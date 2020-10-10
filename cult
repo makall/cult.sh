@@ -63,7 +63,7 @@ logger() {
 			ICON=$(tint 32 "$SUCCESS")
 		fi
 		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
-		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[u"
+		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[0K\e[u"
 		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
 	fi
 
@@ -73,18 +73,12 @@ logger() {
 	fi
 }
 
-test_case() {
-
-	if [ "$CULT_CASE" != "$CURRENT_CASE" ]; then
-		echo -e " $SUCCESS \e[32mCASE:\e[m $CULT_CASE"
-		CURRENT_CASE="$CULT_CASE"
-	fi
-
-}
-
-test_scenario() {
-	echo "CULT_SCENARIO"
-	CURRENT_SCENARIO="$CULT_SCENARIO"
+gibberish() {
+	NUM=$((1 + RANDOM % 9))
+	for i in $(seq "$NUM"); do
+		[ "$i" -gt 1 ] && echo
+		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
+	done
 }
 
 report() {
@@ -134,7 +128,6 @@ SUCCESS='\u2714'
 CULT_ENV="/tmp/$(basename "$0").env"
 CULT_LOG="/tmp/$(basename "$0").log"
 CULT_TRACE="/tmp/$(basename "$0").trace"
-CULT_SINGLE="/tmp/$(basename "$0").single"
 
 [ 0 -ne "$CULT_BEGIN" ] && cleanup
 
@@ -150,6 +143,14 @@ CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
 CULT_CASE="${CULT_CASE:+Case: $CULT_CASE}"
 CULT_OFFSET='0'
 
+if [ -s "$CULT_LOG" ] && [ -n "$(cat "$CULT_LOG" | tail -c 1)" ]; then
+	if [ 0 -eq "$SHOW_LOG" ] && [ 0 -eq "$CULT_STANDALONE" ]; then
+		echo | tee --append "$CULT_LOG"
+	else
+		echo >> "$CULT_LOG"
+	fi
+fi
+
 if [ 0 -ne "$SHOW_LOG" ]; then
 	cat "$CULT_LOG"
 elif [ 0 -ne "$CULT_STANDALONE" ]; then
@@ -157,26 +158,21 @@ elif [ 0 -ne "$CULT_STANDALONE" ]; then
 fi
 
 {
-	#	NUM=$((RANDOM % 10))
-	#	for i in $(seq "$NUM"); do
-	#		[ "$i" -gt 1 ] && echo
-	#		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
-	#	done
-
 	logger "SCENARIO"
 	logger "CASE"
 	logger "STEP"
+
+	gibberish
+
+	if [ 0 -ne "$CULT_STANDALONE" ]; then
+		CULT_STEP= logger "STEP"
+	fi
 
 	# shellcheck disable=SC2034
 	CURRENT_END=$(date +%s)
 
 	set | grep -e '^CURRENT_' > "$CULT_ENV"
 
-	#	NUM=$((RANDOM % 10))
-	#	for i in $(seq "$NUM"); do
-	#		[ "$i" -gt 1 ] && echo
-	#		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
-	#	done
-} | tee --append "$CULT_LOG" | tee "$CULT_SINGLE"
+} | tee --append "$CULT_LOG"
 
 [ 0 -ne "$CULT_END" ] && report
