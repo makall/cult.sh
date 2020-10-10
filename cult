@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+#
+#  CUrL Tester
+#  A simple REST test framework for shell script.
+#
+# vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
+
+test "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)"
+CULT_STANDALONE="$?"
+
+# shellcheck disable=SC2039
+set -o errexit -o nounset -o posix -o pipefail
+
+: "${CULT_BEGIN:=0}"
+: "${CULT_END:=0}"
+: "${CULT_STEP:=}"
+: "${CULT_CASE:=}"
+: "${CULT_SCENARIO:=}"
+: "${CULT_REPORT:=0}"
+
+: "${CURRENT_DIR:=}"
+: "${CURRENT_STEP:=}"
+: "${CURRENT_CASE:=}"
+: "${CURRENT_SCENARIO:=}"
+
+CULT_ENV="/tmp/$(basename "$0").env"
+CULT_LOG="/tmp/$(basename "$0").log"
+CULT_TRACE="/tmp/$(basename "$0").trace"
+CULT_SINGLE="/tmp/$(basename "$0").single"
+
+INFO=$'\e[32;1m\u2714\e[m'
+ERROR=$'\e[31;1m\u2717\e[m'
+
+ICONS=('\e[33;1m\u25cb\e[m' '\e[33;1m\u25cf\e[m' '\e[33;1m\u25cb\e[m' '\e[33;1m\u25cc\e[m')
+
+cleanup() {
+	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_ENV"
+	echo -n > "$CULT_TRACE"
+	echo -n > "$CULT_LOG"
+}
+
+trace() {
+	echo "$*" >> "$CULT_TRACE"
+}
+
+logger() {
+
+	local CULT_ITEM="CULT_$1"
+	local CURRENT_ITEM="CURRENT_$1"
+	local CURRENT_ICON="CURRENT_$1_ICON"
+	local CURRENT_LINE="CURRENT_$1_LINE"
+
+	trace "[$1] ${!CULT_ITEM}"
+
+	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+		echo -e " ${ICONS[0]} ${!CULT_ITEM}"
+		declare -g "$CURRENT_ICON=1"
+	fi
+
+	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+
+	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
+		if [ "${!CURRENT_ITEM}" = "${!CULT_ITEM}" ]; then
+			ICON="${ICONS[$((${!CURRENT_ICON} % "${#ICONS[@]}"))]}"
+		else
+			ICON="$INFO"
+		fi
+		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
+		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[u"
+		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
+	fi
+
+	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+		declare -g "$CURRENT_LINE=$CURRENT_LOG_SIZE"
+		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
+	fi
+
+	#	local CURRENT_LINE="CURRENT_$1_LINE"
+
+	#
+	#	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+	#		if [ -n "${!CULT_ITEM}" ]; then
+	#			trace "[$1] ${!CULT_ITEM}"
+	#			echo -e " ${ICONS[0]} ${!CULT_ITEM}"
+	#			declare -g "$CURRENT_ICON=1"
+	#		fi
+	#		ICON="$INFO"
+	#	fi
+	#
+	#	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+	#
+	#	if [ -n "${!CURRENT_ITEM}" ]; then
+	#		echo -ne "\e[s\e[$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} - LOG_OFFSET + 1))A\r $ICON ${!CURRENT_ITEM}\e[u"
+	#		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
+	#	fi
+	#
+	#	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+	#		declare -g "$CURRENT_LINE=$CURRENT_LOG_SIZE"
+	#		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
+	#	fi
+}
+
+test_case() {
+
+	if [ "$CULT_CASE" != "$CURRENT_CASE" ]; then
+		echo -e " $INFO \e[32mCASE:\e[m $CULT_CASE"
+		CURRENT_CASE="$CULT_CASE"
+	fi
+
+}
+
+test_scenario() {
+	echo "CULT_SCENARIO"
+	CURRENT_SCENARIO="$CULT_SCENARIO"
+}
+
+report() {
+	cat <<- EOF | column -ts:
+		Report:
+		
+		Total run duration: $((CURRENT_END - CURRENT_BEGIN))
+		Steps: $(grep --count --fixed-strings '[STEP]' "$CULT_TRACE")
+	EOF
+}
+
+while true; do
+	case "${1:-}" in
+		-b | --begin) CULT_BEGIN="1" ;;
+		-e | --end) CULT_END="1" ;;
+		-h | --help) show_help ;;
+		-l | --log) cat "$CULT_LOG" ;;
+		-r | --report) CULT_REPORT="1" ;;
+		--test=*) CULT_STEP="${1#*=}" ;;
+		--test-case=*) CULT_CASE="${1#*=}" ;;
+		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
+		-t | --test)
+			CULT_STEP="$2"
+			shift
+			;;
+		-c | --test-case)
+			CULT_CASE="$2"
+			shift
+			;;
+		-s | --test-scenario)
+			CULT_SCENARIO="$2"
+			shift
+			;;
+		--)
+			shift
+			break
+			;;
+		*) break ;;
+	esac
+	shift
+done
+
+[ 0 -ne "$CULT_BEGIN" ] && cleanup
+
+touch "$CULT_ENV"
+touch "$CULT_LOG"
+
+# shellcheck disable=SC1090
+. "$CULT_ENV"
+
+[ 0 -ne "$CULT_REPORT" ] && report
+
+TEST_CASE_LABEL=$'\e[33mCase\e[m:'
+CULT_CASE="${CULT_CASE:+$TEST_CASE_LABEL $CULT_CASE}"
+
+SCENARIO_LABEL=$'\e[33mScenario\e[m:'
+CULT_SCENARIO="${CULT_SCENARIO:+$SCENARIO_LABEL $CULT_SCENARIO}"
+
+if [ 0 -ne "$CULT_STANDALONE" ]; then
+	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+else
+	CULT_OFFSET='0'
+fi
+
+{
+	#	NUM=$((RANDOM % 10))
+	#	for i in $(seq "$NUM"); do
+	#		[ "$i" -gt 1 ] && echo
+	#		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
+	#	done
+
+	logger "SCENARIO"
+	logger "CASE"
+	logger "STEP"
+
+	# shellcheck disable=SC2034
+	CURRENT_END=$(date +%s)
+
+	set | grep -e '^CURRENT_' > "$CULT_ENV"
+
+	#	NUM=$((RANDOM % 10))
+	#	for i in $(seq "$NUM"); do
+	#		[ "$i" -gt 1 ] && echo
+	#		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
+	#	done
+} | tee --append "$CULT_LOG" | tee "$CULT_SINGLE"
+
+[ 0 -ne "$CULT_END" ] && report
