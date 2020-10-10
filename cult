@@ -16,22 +16,19 @@ set -o errexit -o nounset -o posix -o pipefail
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
-: "${CULT_REPORT:=0}"
+
+: "${SHOW_LOG:=0}"
+: "${SHOW_HELP:=0}"
+: "${SHOW_REPORT:=0}"
 
 : "${CURRENT_DIR:=}"
 : "${CURRENT_STEP:=}"
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
 
-CULT_ENV="/tmp/$(basename "$0").env"
-CULT_LOG="/tmp/$(basename "$0").log"
-CULT_TRACE="/tmp/$(basename "$0").trace"
-CULT_SINGLE="/tmp/$(basename "$0").single"
-
-INFO=$'\e[32;1m\u2714\e[m'
-ERROR=$'\e[31;1m\u2717\e[m'
-
-ICONS=('\e[33;1m\u25cb\e[m' '\e[33;1m\u25cf\e[m' '\e[33;1m\u25cb\e[m' '\e[33;1m\u25cc\e[m')
+tint() {
+	echo -e "\e[$1;1m${*:2}\e[m"
+}
 
 cleanup() {
 	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_ENV"
@@ -53,7 +50,7 @@ logger() {
 	trace "[$1] ${!CULT_ITEM}"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		echo -e " ${ICONS[0]} ${!CULT_ITEM}"
+		echo -e " $(tint 33 "${STEPS[0]}") ${!CULT_ITEM}"
 		declare -g "$CURRENT_ICON=1"
 	fi
 
@@ -61,9 +58,9 @@ logger() {
 
 	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
 		if [ "${!CURRENT_ITEM}" = "${!CULT_ITEM}" ]; then
-			ICON="${ICONS[$((${!CURRENT_ICON} % "${#ICONS[@]}"))]}"
+			ICON=$(tint 33 "${STEPS[$((${!CURRENT_ICON} % "${#STEPS[@]}"))]}")
 		else
-			ICON="$INFO"
+			ICON=$(tint 32 "$SUCCESS")
 		fi
 		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
 		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[u"
@@ -74,36 +71,12 @@ logger() {
 		declare -g "$CURRENT_LINE=$CURRENT_LOG_SIZE"
 		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
 	fi
-
-	#	local CURRENT_LINE="CURRENT_$1_LINE"
-
-	#
-	#	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-	#		if [ -n "${!CULT_ITEM}" ]; then
-	#			trace "[$1] ${!CULT_ITEM}"
-	#			echo -e " ${ICONS[0]} ${!CULT_ITEM}"
-	#			declare -g "$CURRENT_ICON=1"
-	#		fi
-	#		ICON="$INFO"
-	#	fi
-	#
-	#	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
-	#
-	#	if [ -n "${!CURRENT_ITEM}" ]; then
-	#		echo -ne "\e[s\e[$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} - LOG_OFFSET + 1))A\r $ICON ${!CURRENT_ITEM}\e[u"
-	#		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
-	#	fi
-	#
-	#	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-	#		declare -g "$CURRENT_LINE=$CURRENT_LOG_SIZE"
-	#		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
-	#	fi
 }
 
 test_case() {
 
 	if [ "$CULT_CASE" != "$CURRENT_CASE" ]; then
-		echo -e " $INFO \e[32mCASE:\e[m $CULT_CASE"
+		echo -e " $SUCCESS \e[32mCASE:\e[m $CULT_CASE"
 		CURRENT_CASE="$CULT_CASE"
 	fi
 
@@ -127,9 +100,9 @@ while true; do
 	case "${1:-}" in
 		-b | --begin) CULT_BEGIN="1" ;;
 		-e | --end) CULT_END="1" ;;
-		-h | --help) show_help ;;
-		-l | --log) cat "$CULT_LOG" ;;
-		-r | --report) CULT_REPORT="1" ;;
+		-l | --log) SHOW_LOG="1" ;;
+		-h | --help) SHOW_HELP="1" ;;
+		-r | --report) SHOW_REPORT="1" ;;
 		--test=*) CULT_STEP="${1#*=}" ;;
 		--test-case=*) CULT_CASE="${1#*=}" ;;
 		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
@@ -154,6 +127,15 @@ while true; do
 	shift
 done
 
+FAIL='\u2717'
+STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
+SUCCESS='\u2714'
+
+CULT_ENV="/tmp/$(basename "$0").env"
+CULT_LOG="/tmp/$(basename "$0").log"
+CULT_TRACE="/tmp/$(basename "$0").trace"
+CULT_SINGLE="/tmp/$(basename "$0").single"
+
 [ 0 -ne "$CULT_BEGIN" ] && cleanup
 
 touch "$CULT_ENV"
@@ -162,18 +144,16 @@ touch "$CULT_LOG"
 # shellcheck disable=SC1090
 . "$CULT_ENV"
 
-[ 0 -ne "$CULT_REPORT" ] && report
+[ 0 -ne "$SHOW_REPORT" ] && report
 
-TEST_CASE_LABEL=$'\e[33mCase\e[m:'
-CULT_CASE="${CULT_CASE:+$TEST_CASE_LABEL $CULT_CASE}"
+CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
+CULT_CASE="${CULT_CASE:+Case: $CULT_CASE}"
+CULT_OFFSET='0'
 
-SCENARIO_LABEL=$'\e[33mScenario\e[m:'
-CULT_SCENARIO="${CULT_SCENARIO:+$SCENARIO_LABEL $CULT_SCENARIO}"
-
-if [ 0 -ne "$CULT_STANDALONE" ]; then
+if [ 0 -ne "$SHOW_LOG" ]; then
+	cat "$CULT_LOG"
+elif [ 0 -ne "$CULT_STANDALONE" ]; then
 	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
-else
-	CULT_OFFSET='0'
 fi
 
 {
