@@ -5,32 +5,40 @@
 #
 # vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
 
+# Must be the first line
 test "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)"
 CULT_STANDALONE="$?"
 
-# shellcheck disable=SC2039
-set -o errexit -o nounset -o posix -o pipefail
+set -o errexit -o nounset -o pipefail
 
 : "${CULT_BEGIN:=0}"
-: "${CULT_END:=0}"
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
 
-: "${SHOW_LOG:=0}"
-: "${SHOW_HELP:=0}"
-: "${SHOW_REPORT:=0}"
+: "${SHOW_LOG:=}"
+: "${SHOW_HELP:=}"
+: "${SHOW_REPORT:=}"
 
 : "${CURRENT_DIR:=}"
 : "${CURRENT_STEP:=}"
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
+: "${CURRENT_RESPONSE:=}"
 
 tint() {
 	echo -e "\e[$1;1m${*:2}\e[m"
 }
 
 cleanup() {
+
+	echo "$(tint 33 '    ___             __   _____          ')_"
+	echo "$(tint 33 '   / __\/\ /\\') _ __ $(tint 33 '/ /  /__   \\')___  ___| |_ ___ _ __ "
+	echo "$(tint 33 '  / /  / / \ \\') '__$(tint 33 '/ /     / /\/') _ \/ __| __/ _ \ '__|"
+	echo "$(tint 33 ' / /___\ \_/ /') | $(tint 33 '/ /___  / /') |  __/\__ \ ||  __/ |   "
+	echo "$(tint 33 ' \____/ \___/')|_| $(tint 33 '\____/  \/')   \___||___/\__\___|_|   "
+	echo
+
 	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_ENV"
 	echo -n > "$CULT_TRACE"
 	echo -n > "$CULT_LOG"
@@ -42,12 +50,18 @@ trace() {
 
 logger() {
 
+	local ICON
+	local POS
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
 	local CURRENT_ICON="CURRENT_$1_ICON"
 	local CURRENT_LINE="CURRENT_$1_LINE"
 
-	trace "[$1] ${!CULT_ITEM}"
+	local FLUSH="${CULT_FLUSH:-}"
+	local FAILED="${CULT_FAIL:-}"
+
+	[ -n "${!CULT_ITEM}" ] && trace "[$1] ${!CULT_ITEM}"
+	[ -n "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && trace "[$1:FAILED] ${!CURRENT_ITEM}"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
 		echo -e " $(tint 33 "${STEPS[0]}") ${!CULT_ITEM}"
@@ -57,58 +71,162 @@ logger() {
 	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 
 	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
-		if [ "${!CURRENT_ITEM}" = "${!CULT_ITEM}" ]; then
+
+		if [ -n "$FAILED" ]; then
+			ICON=$(tint 31 "$FAIL")
+		elif [ -n "${FLUSH:-}" ]; then
+			ICON=$(tint 32 "$SUCCESS")
+		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
 			ICON=$(tint 33 "${STEPS[$((${!CURRENT_ICON} % "${#STEPS[@]}"))]}")
 		else
 			ICON=$(tint 32 "$SUCCESS")
 		fi
+
 		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
+
 		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[0K\e[u"
+
 		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
+
 	fi
 
-	if [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+	if [ -n "${CULT_FLUSH:-}" ] || [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
 		declare -g "$CURRENT_LINE=$CURRENT_LOG_SIZE"
 		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
 	fi
 }
 
-gibberish() {
-	NUM=$((1 + RANDOM % 9))
-	for i in $(seq "$NUM"); do
-		[ "$i" -gt 1 ] && echo
-		echo -n "$(seq "$i" | xargs | tr -d ' ')/$NUM"
-	done
+request() {
+
+	local JSON
+	local OUTPUT
+	local STATUS
+	local REQUEST
+
+	OUTPUT=$(mktemp)
+	REQUEST="${OUTPUT#*.}"
+
+	local CURL=(curl --silent --verbose "$@")
+	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace_Id: $REQUEST")
+
+	{
+		echo -n "[REQUEST:$REQUEST] ${CURL[0]}"
+		printf " %q" "${CURL[@]:1}"
+		echo
+	} >> "$CULT_TRACE"
+
+	STATUS=$("${CURL[@]}" 2>> "$CULT_TRACE")
+	JSON=$(jq < "$OUTPUT" 2>> "$CULT_TRACE" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
+
+	trace "[RESPONSE:$REQUEST]"
+
+	tee --append "$CULT_TRACE" <<- EOF
+		{
+			"status": $STATUS,
+			"json": $JSON
+		}
+	EOF
+}
+
+entry() {
+	local LABEL="$1"
+	local TYPE="$2"
+	echo "$LABEL : $(grep -cE "^\[$TYPE\]" "$CULT_TRACE") : $(grep -cE "^\[$TYPE:FAILED\]" "$CULT_TRACE")"
 }
 
 report() {
+
+	local FAILS
+	local REQUESTS
+	local RESPONSES
+
+	REQUESTS=$(grep -cE "^\[REQUEST:[^]]*\]" "$CULT_TRACE")
+	RESPONSES=$(grep -cE "^\[RESPONSE:[^]]*\]" "$CULT_TRACE")
+
+	FAILS=$((REQUESTS - RESPONSES + $(grep -cE "^\[[^:]*:FAILED\]" "$CULT_TRACE")))
+
+	tint 37 "\nReport\n"
+
 	cat <<- EOF | column -ts:
-		Report:
-		
-		Total run duration: $((CURRENT_END - CURRENT_BEGIN))
-		Steps: $(grep --count --fixed-strings '[STEP]' "$CULT_TRACE")
+		Items : Executed : Failed
+		$(entry "Scenarios" "SCENARIO")
+		$(entry "Cases" "CASE")
+		$(entry "Steps" "STEP")
+		Requests : $REQUESTS : $((REQUESTS - RESPONSES))
+		$(entry "Assertions" "EXPECT")
 	EOF
+
+	echo -e "\nTotal run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
+
+	tint 37 '\nResult\n'
+
+	if [ 0 -eq "$FAILS" ]; then
+		tint 32 " $SUCCESS SUCCESS\n"
+	else
+		tint 31 " $FAIL FAIL\n"
+	fi
+
+	exit "$FAILS"
+}
+
+flush() {
+
+	local CULT_FAIL="${?%0}"
+	local CULT_FLUSH="1"
+
+	set +e
+	exec 1>&0
+	exec > >(tee --append "$CULT_LOG")
+
+	# shellcheck disable=SC2181
+	if [ -n "$CULT_FAIL" ]; then
+		CULT_STEP='' logger "STEP" 1
+		CULT_CASE='' logger "CASE" 1
+		CULT_SCENARIO='' logger "SCENARIO" 1
+	elif [ 0 -ne "$CULT_STANDALONE" ]; then
+		CULT_STEP='' logger "STEP"
+	fi
+
+	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+		printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
+	done > "$CULT_ENV"
+
+	[ -n "$SHOW_REPORT" ] && report 1>&2
+}
+
+check_param() {
+	[ 1 -lt "$#" ] && return
+	echo -e " $(tint 31 "$FAIL") '$1' parameter value is expected"
+	exit 1
 }
 
 while true; do
 	case "${1:-}" in
 		-b | --begin) CULT_BEGIN="1" ;;
-		-e | --end) CULT_END="1" ;;
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
+		--expect=*) CULT_EXPECT=("${1#*=}") ;;
 		--test=*) CULT_STEP="${1#*=}" ;;
 		--test-case=*) CULT_CASE="${1#*=}" ;;
 		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
+		-e | --expect)
+			check_param "$@"
+			CULT_EXPECT=("$2")
+			shift
+			;;
 		-t | --test)
+			check_param "$@"
 			CULT_STEP="$2"
 			shift
 			;;
 		-c | --test-case)
+			check_param "$@"
 			CULT_CASE="$2"
 			shift
 			;;
 		-s | --test-scenario)
+			check_param "$@"
 			CULT_SCENARIO="$2"
 			shift
 			;;
@@ -129,50 +247,33 @@ CULT_ENV="/tmp/$(basename "$0").env"
 CULT_LOG="/tmp/$(basename "$0").log"
 CULT_TRACE="/tmp/$(basename "$0").trace"
 
-[ 0 -ne "$CULT_BEGIN" ] && cleanup
-
-touch "$CULT_ENV"
-touch "$CULT_LOG"
-
-# shellcheck disable=SC1090
-. "$CULT_ENV"
-
-[ 0 -ne "$SHOW_REPORT" ] && report
-
 CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
 CULT_CASE="${CULT_CASE:+Case: $CULT_CASE}"
 CULT_OFFSET='0'
 
-if [ -s "$CULT_LOG" ] && [ -n "$(cat "$CULT_LOG" | tail -c 1)" ]; then
-	if [ 0 -eq "$SHOW_LOG" ] && [ 0 -eq "$CULT_STANDALONE" ]; then
-		echo | tee --append "$CULT_LOG"
-	else
-		echo >> "$CULT_LOG"
-	fi
-fi
+[ 0 -ne "$CULT_BEGIN" ] && cleanup
 
-if [ 0 -ne "$SHOW_LOG" ]; then
-	cat "$CULT_LOG"
+touch "$CULT_ENV"
+trap 'flush' EXIT
+
+exec > >(tee --append "$CULT_LOG")
+
+# shellcheck disable=SC1090
+. "$CULT_ENV"
+
+if [ -n "$SHOW_LOG" ]; then
+	cat "$CULT_LOG" 1>&2
 elif [ 0 -ne "$CULT_STANDALONE" ]; then
 	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 fi
 
+logger "SCENARIO"
+logger "CASE"
+logger "STEP"
+
+[ 0 -lt "$#" ] && CURRENT_RESPONSE=$(request "$@")
+
 {
-	logger "SCENARIO"
-	logger "CASE"
-	logger "STEP"
-
-	gibberish
-
-	if [ 0 -ne "$CULT_STANDALONE" ]; then
-		CULT_STEP= logger "STEP"
-	fi
-
-	# shellcheck disable=SC2034
-	CURRENT_END=$(date +%s)
-
-	set | grep -e '^CURRENT_' > "$CULT_ENV"
-
-} | tee --append "$CULT_LOG"
-
-[ 0 -ne "$CULT_END" ] && report
+	echo "[EXPECT]" "${CULT_EXPECT[@]}"
+	jq --exit-status "${CULT_EXPECT[@]}" <<< "$CURRENT_RESPONSE"
+} >> "$CULT_TRACE"
