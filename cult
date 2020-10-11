@@ -39,7 +39,7 @@ cleanup() {
 
 	tint 33 '    ___             __   _____          ' 0 '_'
 	tint 33 "   / __\/\ /\\" 0 ' _ __ ' 33 "/ /  /__   \\" 0 '___  ___| |_ ___ _ __'
-	tint 33 '  / /  / / \ \' 0 " '__" 33 '/ /     / /\/' 0 " _ \/ __| __/ _ \ '__|"
+	tint 33 "  / /  / / \ \\" 0 " '__" 33 '/ /     / /\/' 0 " _ \/ __| __/ _ \ '__|"
 	tint 33 ' / /___\ \_/ /' 0 ' | ' 33 '/ /___  / /' 0 ' |  __/\__ \ ||  __/ |'
 	tint 33 ' \____/ \___/' 0 '|_| ' 33 '\____/  \/' 0 '   \___||___/\__\___|_|\n'
 
@@ -49,7 +49,7 @@ cleanup() {
 }
 
 trace() {
-	echo "$*" >> "$CULT_TRACE"
+	echo "$*" >&2
 }
 
 logger() {
@@ -103,37 +103,30 @@ logger() {
 request() {
 
 	local JSON
-	local OUTPUT
 	local STATUS
-	local REQUEST
-
-	OUTPUT=$(mktemp)
-	REQUEST="${OUTPUT#*.}"
 
 	local CURL=(curl --silent --verbose "$@")
-	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace_Id: $REQUEST")
+	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace-Id: $TRACE_ID")
 
 	{
-		echo -n "[REQUEST:$REQUEST] ${CURL[0]}"
+		echo -n "[REQUEST] ${CURL[0]}"
 		printf " %q" "${CURL[@]:1}"
 		echo
-	} >> "$CULT_TRACE"
+	} >&2
 
-	STATUS=$("${CURL[@]}" 2>> "$CULT_TRACE")
-	JSON=$(jq < "$OUTPUT" 2>> "$CULT_TRACE" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
+	STATUS=$("${CURL[@]}")
+	JSON=$(jq < "$OUTPUT" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
 
 	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": $JSON }"
-	trace "[RESPONSE:$REQUEST] $CURRENT_RESPONSE"
+	trace "[RESPONSE] $CURRENT_RESPONSE"
 }
 
 count() {
-	grep -cE "$1" "$CULT_TRACE"
+	grep -cE "^[^:]+: \[$*\]" "$CULT_TRACE" || true
 }
 
 entry() {
-	local LABEL="$1"
-	local TYPE="$2"
-	echo "$LABEL : $(count "^\[$TYPE\]") : $(count "^\[$TYPE:FAILED\]")"
+	echo "$1 : $(count "$2") : $(count "$2:FAILED")"
 }
 
 report() {
@@ -141,34 +134,44 @@ report() {
 	local FAILS
 	local REQUESTS
 	local RESPONSES
+	local ASSERTIONS
+	local SUCCESSES
 
-	REQUESTS=$(count "^\[REQUEST:[^]]*\]")
-	RESPONSES=$(count "^\[RESPONSE:[^]]*\]")
+	REQUESTS=$(count 'REQUEST')
+	RESPONSES=$(count 'REQUEST')
 
-	FAILS=$((REQUESTS - RESPONSES + $(grep -cE "^\[[^:]*:FAILED\]" "$CULT_TRACE")))
+	ASSERTIONS=$(count 'EXPECT')
+	SUCCESSES=$(count 'SUCCESS')
+
+	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
 
 	tint 37 "\nReport\n"
 
-	cat <<- EOF | column -ts:
+	cat <<- EOF | column -ts: | sed 's/^/ /'
 		Items : Executed : Failed
 		$(entry "Scenarios" "SCENARIO")
 		$(entry "Cases" "CASE")
 		$(entry "Steps" "STEP")
 		Requests : $REQUESTS : $((REQUESTS - RESPONSES))
-		$(entry "Assertions" "EXPECT")
+		Assertions : $ASSERTIONS : $((ASSERTIONS - SUCCESSES))
 	EOF
 
-	echo -e "\nTotal run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
+	echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
 
 	tint 37 '\nResult\n'
 
 	if [ 0 -eq "$FAILS" ]; then
-		tint 32 " $SUCCESS SUCCESS\n"
+		tint 32 " $SUCCESS SUCCEEDED\n"
 	else
-		tint 31 " $FAIL FAIL\n"
+		tint 31 " $FAIL FAILED\n"
 	fi
 
 	exit "$FAILS"
+}
+
+fail() {
+	tint 37 "\nTrace\n"
+	sed -n "s/^$TRACE_ID://p" "$CULT_TRACE"
 }
 
 flush() {
@@ -176,15 +179,10 @@ flush() {
 	local CULT_FAIL="${?%0}"
 	local CULT_FLUSH="1"
 
-	set +e
-	exec 1>&0
-	exec > >(tee --append "$CULT_LOG")
-
-	# shellcheck disable=SC2181
 	if [ -n "$CULT_FAIL" ]; then
-		CULT_STEP='' logger "STEP" 1
-		CULT_CASE='' logger "CASE" 1
-		CULT_SCENARIO='' logger "SCENARIO" 1
+		CULT_STEP='' logger "STEP"
+		CULT_CASE='' logger "CASE"
+		CULT_SCENARIO='' logger "SCENARIO"
 	elif [ 0 -ne "$CULT_STANDALONE" ]; then
 		CULT_STEP='' logger "STEP"
 	fi
@@ -193,7 +191,13 @@ flush() {
 		printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
 	done > "$CULT_ENV"
 
-	[ -n "$SHOW_REPORT" ] && report 1>&2
+	exec 1>&0
+	exec 2>&0
+
+	[ -z "$CULT_FAIL" ] || fail
+	[ -z "$SHOW_REPORT" ] || report
+
+	return "$?$CULT_FAIL"
 }
 
 check_param() {
@@ -249,21 +253,25 @@ CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
 CULT_CASE="${CULT_CASE:+Case: $CULT_CASE}"
 CULT_OFFSET='0'
 
-[ 0 -ne "$CULT_BEGIN" ] && cleanup
+OUTPUT=$(mktemp)
+TRACE_ID="${OUTPUT#*.}"
 
-touch "$CULT_ENV"
 trap 'flush' EXIT
+touch "$CULT_ENV"
 
-exec > >(tee --append "$CULT_LOG")
+[ 0 -ne "$CULT_BEGIN" ] && cleanup
 
 # shellcheck disable=SC1090
 . "$CULT_ENV"
 
 if [ -n "$SHOW_LOG" ]; then
-	cat "$CULT_LOG" 1>&2
+	cat "$CULT_LOG"
 elif [ 0 -ne "$CULT_STANDALONE" ]; then
 	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 fi
+
+exec > >(tee --append "$CULT_LOG")
+exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 logger "SCENARIO"
 logger "CASE"
@@ -271,7 +279,8 @@ logger "STEP"
 
 [ 0 -lt "$#" ] && request "$@"
 
-{
-	echo "[EXPECT]" "${CULT_EXPECT[@]}"
-	jq --exit-status "${CULT_EXPECT[@]}" <<< "$CURRENT_RESPONSE"
-} >> "$CULT_TRACE"
+if [ -n "${CULT_EXPECT[*]}" ]; then
+	trace "[EXPECT] ${CULT_EXPECT[*]}"
+	jq --exit-status "${CULT_EXPECT[@]}" <<< "$CURRENT_RESPONSE" >&2
+	trace '[SUCCESS]'
+fi
