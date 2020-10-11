@@ -11,4 +11,4 @@ export CULT_CASE="Test case $1"
 
 ./cult --test "My Test $1 B"
 
-./cult --test "My Test $1 C" -e '.status == 100' http://ifconfig.me
+./cult --test "My Test $1 C" --assert='.status == 200' http://ifconfig.me
