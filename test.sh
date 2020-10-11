@@ -9,6 +9,10 @@ export CULT_CASE="Test case $1"
 
 ./cult --test "My Test $1 A"
 
-./cult --test "My Test $1 B"
+./cult --test "My Test $1 B" \
+	--assert '.json.hello == "world"' \
+	--assert='.json.tester == "curl"' \
+	-a '.status == 200' \
+	http://echo.jsontest.com/hello/world/tester/curl
 
 ./cult --test "My Test $1 C" --assert='.status == 200' http://ifconfig.me

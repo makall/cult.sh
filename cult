@@ -26,6 +26,8 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_SCENARIO:=}"
 : "${CURRENT_RESPONSE:=}"
 
+declare -a CULT_ASSERT
+
 FAIL='\u2717'
 STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
 SUCCESS='\u2714'
@@ -212,13 +214,13 @@ while true; do
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
-		--assert=*) CULT_ASSERT=("${1#*=}") ;;
+		--assert=*) CULT_ASSERT+=("${1#*=}") ;;
 		--test=*) CULT_STEP="${1#*=}" ;;
 		--test-case=*) CULT_CASE="${1#*=}" ;;
 		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
 		-a | --assert)
 			check_param "$@"
-			CULT_ASSERT=("$2")
+			CULT_ASSERT+=("$2")
 			shift
 			;;
 		-t | --test)
@@ -279,8 +281,8 @@ logger "STEP"
 
 [ 0 -lt "$#" ] && request "$@"
 
-if [ -n "${CULT_ASSERT[*]}" ]; then
-	trace "[ASSERT] ${CULT_ASSERT[*]}"
-	jq --exit-status "${CULT_ASSERT[@]}" <<< "$CURRENT_RESPONSE" >&2
-	trace '[SUCCESS]'
-fi
+for ASSERT in "${CULT_ASSERT[@]}"; do
+	trace "[ASSERT] $ASSERT"
+	jq --exit-status "$ASSERT" <<< "$CURRENT_RESPONSE" >&2
+	trace "[SUCCESS] $ASSERT"
+done
