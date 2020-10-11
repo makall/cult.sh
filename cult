@@ -27,17 +27,17 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_RESPONSE:=}"
 
 tint() {
-	echo -e "\e[$1;1m${*:2}\e[m"
+	printf "\e[%d;1m%b\e[m" "$@"
+	echo
 }
 
 cleanup() {
 
-	echo "$(tint 33 '    ___             __   _____          ')_"
-	echo "$(tint 33 '   / __\/\ /\\') _ __ $(tint 33 '/ /  /__   \\')___  ___| |_ ___ _ __ "
-	echo "$(tint 33 '  / /  / / \ \\') '__$(tint 33 '/ /     / /\/') _ \/ __| __/ _ \ '__|"
-	echo "$(tint 33 ' / /___\ \_/ /') | $(tint 33 '/ /___  / /') |  __/\__ \ ||  __/ |   "
-	echo "$(tint 33 ' \____/ \___/')|_| $(tint 33 '\____/  \/')   \___||___/\__\___|_|   "
-	echo
+	tint 33 '    ___             __   _____          ' 0 '_'
+	tint 33 "   / __\/\ /\\" 0 ' _ __ ' 33 "/ /  /__   \\" 0 '___  ___| |_ ___ _ __'
+	tint 33 '  / /  / / \ \' 0 " '__" 33 '/ /     / /\/' 0 " _ \/ __| __/ _ \ '__|"
+	tint 33 ' / /___\ \_/ /' 0 ' | ' 33 '/ /___  / /' 0 ' |  __/\__ \ ||  __/ |'
+	tint 33 ' \____/ \___/' 0 '|_| ' 33 '\____/  \/' 0 '   \___||___/\__\___|_|\n'
 
 	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_ENV"
 	echo -n > "$CULT_TRACE"
@@ -64,7 +64,7 @@ logger() {
 	[ -n "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && trace "[$1:FAILED] ${!CURRENT_ITEM}"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		echo -e " $(tint 33 "${STEPS[0]}") ${!CULT_ITEM}"
+		tint 33 "${STEPS[0]}" 0 "${!CULT_ITEM}"
 		declare -g "$CURRENT_ICON=1"
 	fi
 
