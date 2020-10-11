@@ -26,6 +26,10 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_SCENARIO:=}"
 : "${CURRENT_RESPONSE:=}"
 
+FAIL='\u2717'
+STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
+SUCCESS='\u2714'
+
 tint() {
 	printf "\e[%d;1m%b\e[m" "$@"
 	echo
@@ -64,7 +68,7 @@ logger() {
 	[ -n "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && trace "[$1:FAILED] ${!CURRENT_ITEM}"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		tint 33 "${STEPS[0]}" 0 "${!CULT_ITEM}"
+		tint 33 " ${STEPS[0]}" 0 " ${!CULT_ITEM}"
 		declare -g "$CURRENT_ICON=1"
 	fi
 
@@ -118,20 +122,18 @@ request() {
 	STATUS=$("${CURL[@]}" 2>> "$CULT_TRACE")
 	JSON=$(jq < "$OUTPUT" 2>> "$CULT_TRACE" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
 
-	trace "[RESPONSE:$REQUEST]"
+	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": $JSON }"
+	trace "[RESPONSE:$REQUEST] $CURRENT_RESPONSE"
+}
 
-	tee --append "$CULT_TRACE" <<- EOF
-		{
-			"status": $STATUS,
-			"json": $JSON
-		}
-	EOF
+count() {
+	grep -cE "$1" "$CULT_TRACE"
 }
 
 entry() {
 	local LABEL="$1"
 	local TYPE="$2"
-	echo "$LABEL : $(grep -cE "^\[$TYPE\]" "$CULT_TRACE") : $(grep -cE "^\[$TYPE:FAILED\]" "$CULT_TRACE")"
+	echo "$LABEL : $(count "^\[$TYPE\]") : $(count "^\[$TYPE:FAILED\]")"
 }
 
 report() {
@@ -140,8 +142,8 @@ report() {
 	local REQUESTS
 	local RESPONSES
 
-	REQUESTS=$(grep -cE "^\[REQUEST:[^]]*\]" "$CULT_TRACE")
-	RESPONSES=$(grep -cE "^\[RESPONSE:[^]]*\]" "$CULT_TRACE")
+	REQUESTS=$(count "^\[REQUEST:[^]]*\]")
+	RESPONSES=$(count "^\[RESPONSE:[^]]*\]")
 
 	FAILS=$((REQUESTS - RESPONSES + $(grep -cE "^\[[^:]*:FAILED\]" "$CULT_TRACE")))
 
@@ -196,7 +198,7 @@ flush() {
 
 check_param() {
 	[ 1 -lt "$#" ] && return
-	echo -e " $(tint 31 "$FAIL") '$1' parameter value is expected"
+	tint 31 " $FAIL" 0 " '$1' parameter value is expected"
 	exit 1
 }
 
@@ -239,10 +241,6 @@ while true; do
 	shift
 done
 
-FAIL='\u2717'
-STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
-SUCCESS='\u2714'
-
 CULT_ENV="/tmp/$(basename "$0").env"
 CULT_LOG="/tmp/$(basename "$0").log"
 CULT_TRACE="/tmp/$(basename "$0").trace"
@@ -271,7 +269,7 @@ logger "SCENARIO"
 logger "CASE"
 logger "STEP"
 
-[ 0 -lt "$#" ] && CURRENT_RESPONSE=$(request "$@")
+[ 0 -lt "$#" ] && request "$@"
 
 {
 	echo "[EXPECT]" "${CULT_EXPECT[@]}"
