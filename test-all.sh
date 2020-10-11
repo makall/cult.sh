@@ -1,14 +1,13 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
 
-set -e
+set -o errexit
 
 trap "./cult --report" EXIT
 
 cd "$(dirname "$0")" || exit
 
 ./cult --begin --test-scenario "My Test Scenario"
-
 
 ./test.sh 1
 ./test.sh 2

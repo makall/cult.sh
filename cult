@@ -5,10 +5,6 @@
 #
 # vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
 
-# Must be the first line
-test "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)"
-CULT_STANDALONE="$?"
-
 set -o errexit -o nounset -o pipefail
 
 : "${CULT_BEGIN:=0}"
@@ -26,7 +22,11 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_SCENARIO:=}"
 : "${CURRENT_RESPONSE:=}"
 
+: "${PIPED:=}"
+: "${STANDALONE:=}"
+
 declare -a CULT_ASSERT
+declare -a CULT_EXTRACT
 
 FAIL='\u2717'
 STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
@@ -56,8 +56,6 @@ trace() {
 
 logger() {
 
-	local ICON
-	local POS
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
 	local CURRENT_ICON="CURRENT_$1_ICON"
@@ -76,7 +74,11 @@ logger() {
 
 	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 
-	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
+	if [[ -z "$PIPED" && -n "${!CURRENT_ITEM}" && "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]]; then
+
+		local POS
+		local MSG
+		local ICON
 
 		if [ -n "$FAILED" ]; then
 			ICON=$(tint 31 "$FAIL")
@@ -89,8 +91,9 @@ logger() {
 		fi
 
 		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
+		MSG=" $ICON $(tint 0 "${!CURRENT_ITEM}")"
 
-		echo -ne "\e[s\e[${POS}A\r $ICON ${!CURRENT_ITEM}\e[0K\e[u"
+		echo -ne "\e[s\e[${POS}A\r$MSG\e[0K\e[u"
 
 		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
 
@@ -171,6 +174,17 @@ report() {
 	exit "$FAILS"
 }
 
+extract() {
+	for EXTRACT in "${CULT_EXTRACT[@]}"; do
+		trace "[EXTRACT] $EXTRACT"
+		if [[ "$EXTRACT" == "R:"* ]]; then
+			jq --raw-output "${EXTRACT#*:}" <<< "$CURRENT_RESPONSE"
+		else
+			jq "$EXTRACT" <<< "$CURRENT_RESPONSE"
+		fi
+	done
+}
+
 fail() {
 	tint 37 "\nTrace\n"
 	sed -n "s/^$TRACE_ID://p" "$CULT_TRACE"
@@ -185,7 +199,7 @@ flush() {
 		CULT_STEP='' logger "STEP"
 		CULT_CASE='' logger "CASE"
 		CULT_SCENARIO='' logger "SCENARIO"
-	elif [ 0 -ne "$CULT_STANDALONE" ]; then
+	elif [ -n "$STANDALONE" ]; then
 		CULT_STEP='' logger "STEP"
 	fi
 
@@ -193,8 +207,9 @@ flush() {
 		printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
 	done > "$CULT_ENV"
 
-	exec 1>&0
-	exec 2>&0
+	exec 1>&4
+	extract
+	exec 2>&5
 
 	[ -z "$CULT_FAIL" ] || fail
 	[ -z "$SHOW_REPORT" ] || report
@@ -215,12 +230,24 @@ while true; do
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
 		--assert=*) CULT_ASSERT+=("${1#*=}") ;;
+		--extract=*) CULT_EXTRACT+=("${1#*=}") ;;
+		--raw-extract=*) CULT_EXTRACT+=("R:${1#*=}") ;;
 		--test=*) CULT_STEP="${1#*=}" ;;
 		--test-case=*) CULT_CASE="${1#*=}" ;;
 		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
 		-a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
+			shift
+			;;
+		-e | --extract)
+			check_param "$@"
+			CULT_EXTRACT+=("$2")
+			shift
+			;;
+		-E | --raw-extract)
+			check_param "$@"
+			CULT_EXTRACT+=("R:$2")
 			shift
 			;;
 		-t | --test)
@@ -247,6 +274,9 @@ while true; do
 	shift
 done
 
+[ "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)" ] || STANDALONE="1"
+[ -t 1 ] || PIPED="1"
+
 CULT_ENV="/tmp/$(basename "$0").env"
 CULT_LOG="/tmp/$(basename "$0").log"
 CULT_TRACE="/tmp/$(basename "$0").trace"
@@ -268,12 +298,12 @@ touch "$CULT_ENV"
 
 if [ -n "$SHOW_LOG" ]; then
 	cat "$CULT_LOG"
-elif [ 0 -ne "$CULT_STANDALONE" ]; then
+elif [ -n "$STANDALONE" ]; then
 	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 fi
 
-exec > >(tee --append "$CULT_LOG")
-exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
+exec 4>&1 > >(tee --append "$CULT_LOG")
+exec 5>&2 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 logger "SCENARIO"
 logger "CASE"
@@ -283,6 +313,6 @@ logger "STEP"
 
 for ASSERT in "${CULT_ASSERT[@]}"; do
 	trace "[ASSERT] $ASSERT"
-	jq --exit-status "$ASSERT" <<< "$CURRENT_RESPONSE" >&2
+	jq --exit-status "$ASSERT" <<< "${CURRENT_RESPONSE:-\{\}}" >&2
 	trace "[SUCCESS] $ASSERT"
 done
