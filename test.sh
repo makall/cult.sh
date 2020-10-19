@@ -5,9 +5,9 @@ set -o errexit
 
 cd "$(dirname "$0")" || exit
 
-export CULT_CASE="Test case $1"
-
-./cult --test "My Test $1 B" \
+./cult \
+	--test-case "Test case $1" \
+	--test "My Test $1 B" \
 	--assert '.json.hello == "world"' \
 	--assert '.json.tester == "curl"' \
 	-a '.status == 200' \

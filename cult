@@ -7,7 +7,9 @@
 
 set -o errexit -o nounset -o pipefail
 
-: "${CULT_BEGIN:=0}"
+: "${CULT_BEGIN:=}"
+: "${CULT_USER:=}"
+: "${CULT_CLIENT:=}"
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
@@ -16,17 +18,23 @@ set -o errexit -o nounset -o pipefail
 : "${SHOW_HELP:=}"
 : "${SHOW_REPORT:=}"
 
-: "${CURRENT_DIR:=}"
 : "${CURRENT_STEP:=}"
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
 : "${CURRENT_RESPONSE:=}"
+: "${CURRENT_CLIENT:=}"
+: "${CURRENT_USER:=}"
+: "${CURRENT_TOKEN:=}"
+: "${CURRENT_TOKEN_EXPIRATION:=}"
 
 : "${STANDALONE:=}"
+: "${LOGOUT:=}"
+: "${LOG_OFFSET:=0}"
+: "${LOCAL_ENV:=.cult}"
 
+declare -a QUERY_PARAMS
 declare -a CULT_ASSERT
 declare -a CULT_PRINT
-declare -a QUERY_PARAMS
 declare -A CULT_VARIABLES
 declare -A CURRENT_VARIABLES
 
@@ -76,7 +84,7 @@ logger() {
 
 	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 
-	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
+	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$LOG_OFFSET" ]; then
 
 		local POS
 		local MSG
@@ -121,6 +129,10 @@ request() {
 		CURL+=(--data-binary "$(jq "${QUERY_PARAMS[@]}" --from-file /dev/stdin "$CULT_EMPTY")")
 	fi
 
+	if [ -n "$CURRENT_TOKEN" ]; then
+		CURL+=(--header "Authorization: Bearer $CURRENT_TOKEN")
+	fi
+
 	{
 		echo -n "[REQUEST] ${CURL[0]}"
 		printf " %q" "${CURL[@]:1}"
@@ -132,6 +144,49 @@ request() {
 
 	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": $JSON }"
 	trace "[RESPONSE] $CURRENT_RESPONSE"
+}
+
+auth_setup() {
+	local CULT_ITEM="CULT_$1"
+	local CURRENT_ITEM="CURRENT_$1"
+	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
+		CURRENT_TOKEN=''
+	fi
+}
+
+auth() {
+
+	auth_setup 'USER'
+	auth_setup 'CLIENT'
+
+	if [ -n "$CURRENT_CLIENT" ]; then
+
+		if [ -z "$CURRENT_TOKEN" ] || [ "$(date '+%s')" -gt "${CURRENT_TOKEN_EXPIRATION:-0}" ]; then
+
+			local DATA="grant_type=client_credentials"
+
+			CURRENT_TOKEN=''
+
+			if [ -n "$CURRENT_USER" ]; then
+				DATA="grant_type=password&username=$CURRENT_USER&password=${USERS[$CURRENT_USER]}"
+			fi
+
+			request "$TOKEN_ENDPOINT" \
+				--header 'Content-Type: application/x-www-form-urlencoded' \
+				--header "Authorization: Basic $(echo -n "$CURRENT_CLIENT:${CLIENTS[$CURRENT_CLIENT]}" | base64)" \
+				--data-raw "$DATA"
+
+			query --exit-status ".status == 200" >&2
+
+			CURRENT_TOKEN=$(query --exit-status .json.access_token)
+			CURRENT_TOKEN_EXPIRATION=$(query --exit-status ".json.expires_in + $(date '+%s')")
+
+		fi
+
+	else
+		CURRENT_TOKEN=''
+	fi
 }
 
 count() {
@@ -182,8 +237,37 @@ report() {
 	exit "$FAILS"
 }
 
+prepare_query_params() {
+	for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
+		QUERY_PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
+	done
+}
+
 query() {
 	jq "${QUERY_PARAMS[@]}" "$@" <<< "${CURRENT_RESPONSE:-{\}}"
+}
+
+assert_all() {
+	for ASSERT in "${CULT_ASSERT[@]}"; do
+		trace "[ASSERT] $ASSERT"
+		query --exit-status "$ASSERT" >&2
+		trace "[SUCCESS] $ASSERT"
+	done
+}
+
+extract_variables() {
+	for VARIABLE in "${!CULT_VARIABLES[@]}"; do
+		trace "[VARIABLE] $VARIABLE"
+		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
+		trace "[VARIABLE] $VARIABLE=${CURRENT_VARIABLES["$VARIABLE"]}"
+	done
+}
+
+print_all() {
+	for PRINT in "${CULT_PRINT[@]}"; do
+		trace "[PRINT] $PRINT"
+		query --color-output "$PRINT"
+	done
 }
 
 fail() {
@@ -229,17 +313,24 @@ while true; do
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
+		--logout) LOGOUT="1" ;;
 		-a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
 			shift
 			;;
+		-e | --env)
+			check_param "$@"
+			LOCAL_ENV="$2"
+			shift
+			;;
+
 		-p | --print)
 			check_param "$@"
 			CULT_PRINT+=("$2")
 			shift
 			;;
-		-v | --variable)
+		-v | --var)
 			check_param "$@"
 			CULT_VARIABLES["$2"]="$3"
 			shift 2
@@ -251,12 +342,22 @@ while true; do
 			;;
 		-c | --test-case)
 			check_param "$@"
-			CULT_CASE="$2"
+			CULT_CASE="Case: $2"
 			shift
 			;;
 		-s | --test-scenario)
 			check_param "$@"
-			CULT_SCENARIO="$2"
+			CULT_SCENARIO="Scenario: $2"
+			shift
+			;;
+		-u | --user)
+			check_param "$@"
+			CULT_USER="$2"
+			shift
+			;;
+		-C | --client)
+			check_param "$@"
+			CULT_CLIENT="$2"
 			shift
 			;;
 		--)
@@ -275,26 +376,30 @@ CULT_LOG="/tmp/$(basename "$0").log"
 CULT_EMPTY="/tmp/$(basename "$0").empty"
 CULT_TRACE="/tmp/$(basename "$0").trace"
 
-CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
-CULT_CASE="${CULT_CASE:+Case: $CULT_CASE}"
-CULT_OFFSET='0'
-
 OUTPUT=$(mktemp)
 TRACE_ID="${OUTPUT#*.}"
 
 trap 'flush' EXIT
-touch "$CULT_ENV"
 touch "$CULT_LOG"
 
-[ 0 -ne "$CULT_BEGIN" ] && cleanup
+[ -n "$CULT_BEGIN" ] && cleanup
 
 # shellcheck disable=SC1090
-. "$CULT_ENV"
+[ -f "$CULT_ENV" ] && . "$CULT_ENV"
+
+# shellcheck disable=SC1090
+[ -f "$LOCAL_ENV" ] && . "$LOCAL_ENV"
 
 if [ -n "$SHOW_LOG" ]; then
 	cat "$CULT_LOG"
 elif [ -n "$STANDALONE" ]; then
-	CULT_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+	LOG_OFFSET=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+fi
+
+if [ -n "$LOGOUT" ]; then
+	CURRENT_CLIENT=''
+	CURRENT_TOKEN=''
+	CURRENT_USER=''
 fi
 
 exec 4>&1 > >(tee --append "$CULT_LOG")
@@ -304,25 +409,13 @@ logger "SCENARIO"
 logger "CASE"
 logger "STEP"
 
-for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
-	QUERY_PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
-done
+prepare_query_params
 
-[ 0 -lt "$#" ] && request "$@"
+if [ 0 -lt "$#" ]; then
+	auth
+	request "$@"
+fi
 
-for ASSERT in "${CULT_ASSERT[@]}"; do
-	trace "[ASSERT] $ASSERT"
-	query --exit-status "$ASSERT" >&2
-	trace "[SUCCESS] $ASSERT"
-done
-
-for VARIABLE in "${!CULT_VARIABLES[@]}"; do
-	trace "[VARIABLE] $VARIABLE"
-	CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
-	trace "[VARIABLE] $VARIABLE=${CURRENT_VARIABLES["$VARIABLE"]}"
-done
-
-for PRINT in "${CULT_PRINT[@]}"; do
-	trace "[PRINT] $PRINT"
-	query --color-output "$PRINT"
-done
+assert_all
+extract_variables
+print_all
