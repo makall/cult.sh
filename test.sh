@@ -7,16 +7,15 @@ cd "$(dirname "$0")" || exit
 
 export CULT_CASE="Test case $1"
 
-./cult --test 'Should extract values' 'http://time.jsontest.com'
-
-IFS=$'\n' read -r -d '' TIME DATE < <(./cult -e '.json.time' -E '.json.date') || true
-
-./cult -t "Extracted date time: $DATE $TIME" -a "\"$DATE\" != "null"" -a "$TIME != null"
-
 ./cult --test "My Test $1 B" \
-	--assert='.json.hello == "world"' \
+	--assert '.json.hello == "world"' \
 	--assert '.json.tester == "curl"' \
 	-a '.status == 200' \
 	'http://echo.jsontest.com/hello/world/tester/curl'
 
-./cult --test "My Test $1 C" --assert='.status == 200' 'http://ifconfig.me'
+./cult --test "My Test $1 C" -v myIP '.json' --assert '.status == 200' 'http://ifconfig.me'
+
+# shellcheck disable=SC2016
+./cult --test "My IP did not change" --assert '.json == $myIP' 'http://ifconfig.me'
+
+./cult --print '.'

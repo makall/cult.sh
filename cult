@@ -27,6 +27,8 @@ set -o errexit -o nounset -o pipefail
 
 declare -a CULT_ASSERT
 declare -a CULT_PRINT
+declare -A CULT_VARIABLES
+declare -A CURRENT_VARIABLES
 
 FAIL='\u2717'
 STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
@@ -174,11 +176,14 @@ report() {
 	exit "$FAILS"
 }
 
-print() {
-	for PRINT in "${CULT_PRINT[@]}"; do
-		trace "[PRINT] $PRINT"
-		jq --raw-output "${PRINT#*:}" <<< "$CURRENT_RESPONSE"
+query() {
+	local PARAMS=("$@")
+
+	for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
+		PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
 	done
+
+	jq "${PARAMS[@]}" <<< "${CURRENT_RESPONSE:-{\}}"
 }
 
 fail() {
@@ -199,12 +204,18 @@ flush() {
 		CULT_STEP='' logger "STEP"
 	fi
 
-	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
-		printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
-	done > "$CULT_ENV"
+	{
+		echo "declare -A CURRENT_VARIABLES"
+		set | grep -E "^CURRENT_VARIABLES=" || true
+
+		for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+			[ "$CURRENT" = "CURRENT_VARIABLES" ] && continue
+			printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
+		done
+
+	} > "$CULT_ENV"
 
 	exec 1>&4
-	print
 	exec 2>&5
 
 	[ -z "$CULT_FAIL" ] || fail
@@ -225,11 +236,6 @@ while true; do
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
-		--assert=*) CULT_ASSERT+=("${1#*=}") ;;
-		--print=*) CULT_PRINT+=("${1#*=}") ;;
-		--test=*) CULT_STEP="${1#*=}" ;;
-		--test-case=*) CULT_CASE="${1#*=}" ;;
-		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
 		-a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
@@ -239,6 +245,11 @@ while true; do
 			check_param "$@"
 			CULT_PRINT+=("$2")
 			shift
+			;;
+		-v | --variable)
+			check_param "$@"
+			CULT_VARIABLES["$2"]="$3"
+			shift 2
 			;;
 		-t | --test)
 			check_param "$@"
@@ -304,6 +315,17 @@ logger "STEP"
 
 for ASSERT in "${CULT_ASSERT[@]}"; do
 	trace "[ASSERT] $ASSERT"
-	jq --exit-status "$ASSERT" <<< "${CURRENT_RESPONSE:-\{\}}" >&2
+	query --exit-status "$ASSERT" >&2
 	trace "[SUCCESS] $ASSERT"
+done
+
+for VARIABLE in "${!CULT_VARIABLES[@]}"; do
+	trace "[VARIABLE] $VARIABLE"
+	CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
+	trace "[VARIABLE] $VARIABLE=${CURRENT_VARIABLES["$VARIABLE"]}"
+done
+
+for PRINT in "${CULT_PRINT[@]}"; do
+	trace "[PRINT] $PRINT"
+	query --color-output "$PRINT"
 done
