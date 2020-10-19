@@ -19,3 +19,9 @@ export CULT_CASE="Test case $1"
 ./cult --test "My IP did not change" --assert '.json == $myIP' 'http://ifconfig.me'
 
 ./cult --print '.'
+
+./cult -a '.status == 200' -a '.json.json.hello == $myIP' https://postman-echo.com/post <<- EOF
+{
+"hello": \$myIP
+}
+EOF

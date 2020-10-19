@@ -22,11 +22,11 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_SCENARIO:=}"
 : "${CURRENT_RESPONSE:=}"
 
-: "${PIPED:=}"
 : "${STANDALONE:=}"
 
 declare -a CULT_ASSERT
 declare -a CULT_PRINT
+declare -a QUERY_PARAMS
 declare -A CULT_VARIABLES
 declare -A CURRENT_VARIABLES
 
@@ -76,7 +76,7 @@ logger() {
 
 	CURRENT_LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 
-	if [[ -z "$PIPED" && -n "${!CURRENT_ITEM}" && "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]]; then
+	if [ -n "${!CURRENT_ITEM}" ] && [ "${!CURRENT_LINE}" -gt "$CULT_OFFSET" ]; then
 
 		local POS
 		local MSG
@@ -114,6 +114,12 @@ request() {
 
 	local CURL=(curl --silent --verbose "$@")
 	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace-Id: $TRACE_ID")
+
+	if [ ! -t 0 ]; then
+		echo '{}' > "$CULT_EMPTY"
+		CURL+=(--header "Content-Type: application/json")
+		CURL+=(--data-binary "$(jq "${QUERY_PARAMS[@]}" --from-file /dev/stdin "$CULT_EMPTY")")
+	fi
 
 	{
 		echo -n "[REQUEST] ${CURL[0]}"
@@ -177,13 +183,7 @@ report() {
 }
 
 query() {
-	local PARAMS=("$@")
-
-	for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
-		PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
-	done
-
-	jq "${PARAMS[@]}" <<< "${CURRENT_RESPONSE:-{\}}"
+	jq "${QUERY_PARAMS[@]}" "$@" <<< "${CURRENT_RESPONSE:-{\}}"
 }
 
 fail() {
@@ -204,16 +204,9 @@ flush() {
 		CULT_STEP='' logger "STEP"
 	fi
 
-	{
-		echo "declare -A CURRENT_VARIABLES"
-		set | grep -E "^CURRENT_VARIABLES=" || true
-
-		for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
-			[ "$CURRENT" = "CURRENT_VARIABLES" ] && continue
-			printf "%s=%q\n" "$CURRENT" "${!CURRENT}"
-		done
-
-	} > "$CULT_ENV"
+	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+		declare -p "$CURRENT"
+	done > "$CULT_ENV"
 
 	exec 1>&4
 	exec 2>&5
@@ -276,10 +269,10 @@ while true; do
 done
 
 [ "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)" ] || STANDALONE="1"
-[ -t 1 ] || PIPED="1"
 
 CULT_ENV="/tmp/$(basename "$0").env"
 CULT_LOG="/tmp/$(basename "$0").log"
+CULT_EMPTY="/tmp/$(basename "$0").empty"
 CULT_TRACE="/tmp/$(basename "$0").trace"
 
 CULT_SCENARIO="${CULT_SCENARIO:+Scenario: $CULT_SCENARIO}"
@@ -310,6 +303,10 @@ exec 5>&2 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 logger "SCENARIO"
 logger "CASE"
 logger "STEP"
+
+for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
+	QUERY_PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
+done
 
 [ 0 -lt "$#" ] && request "$@"
 
