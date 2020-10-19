@@ -26,7 +26,7 @@ set -o errexit -o nounset -o pipefail
 : "${STANDALONE:=}"
 
 declare -a CULT_ASSERT
-declare -a CULT_EXTRACT
+declare -a CULT_PRINT
 
 FAIL='\u2717'
 STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
@@ -174,14 +174,10 @@ report() {
 	exit "$FAILS"
 }
 
-extract() {
-	for EXTRACT in "${CULT_EXTRACT[@]}"; do
-		trace "[EXTRACT] $EXTRACT"
-		if [[ "$EXTRACT" == "R:"* ]]; then
-			jq --raw-output "${EXTRACT#*:}" <<< "$CURRENT_RESPONSE"
-		else
-			jq "$EXTRACT" <<< "$CURRENT_RESPONSE"
-		fi
+print() {
+	for PRINT in "${CULT_PRINT[@]}"; do
+		trace "[PRINT] $PRINT"
+		jq --raw-output "${PRINT#*:}" <<< "$CURRENT_RESPONSE"
 	done
 }
 
@@ -208,7 +204,7 @@ flush() {
 	done > "$CULT_ENV"
 
 	exec 1>&4
-	extract
+	print
 	exec 2>&5
 
 	[ -z "$CULT_FAIL" ] || fail
@@ -230,8 +226,7 @@ while true; do
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
 		--assert=*) CULT_ASSERT+=("${1#*=}") ;;
-		--extract=*) CULT_EXTRACT+=("${1#*=}") ;;
-		--raw-extract=*) CULT_EXTRACT+=("R:${1#*=}") ;;
+		--print=*) CULT_PRINT+=("${1#*=}") ;;
 		--test=*) CULT_STEP="${1#*=}" ;;
 		--test-case=*) CULT_CASE="${1#*=}" ;;
 		--test-scenario=*) CULT_SCENARIO="${1#*=}" ;;
@@ -240,14 +235,9 @@ while true; do
 			CULT_ASSERT+=("$2")
 			shift
 			;;
-		-e | --extract)
+		-p | --print)
 			check_param "$@"
-			CULT_EXTRACT+=("$2")
-			shift
-			;;
-		-E | --raw-extract)
-			check_param "$@"
-			CULT_EXTRACT+=("R:$2")
+			CULT_PRINT+=("$2")
 			shift
 			;;
 		-t | --test)
@@ -290,6 +280,7 @@ TRACE_ID="${OUTPUT#*.}"
 
 trap 'flush' EXIT
 touch "$CULT_ENV"
+touch "$CULT_LOG"
 
 [ 0 -ne "$CULT_BEGIN" ] && cleanup
 
