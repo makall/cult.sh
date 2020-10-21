@@ -33,6 +33,7 @@ set -o errexit -o nounset -o pipefail
 : "${LOG_OFFSET:=0}"
 : "${LOCAL_ENV:=.cult}"
 
+declare -a REQUEST_PARAMS
 declare -a QUERY_PARAMS
 declare -a CULT_ASSERT
 declare -a CULT_PRINT
@@ -124,12 +125,6 @@ request() {
 	local CURL=(curl --silent --verbose "$@")
 	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace-Id: $TRACE_ID")
 
-	if [ ! -t 0 ]; then
-		echo '{}' > "$CULT_EMPTY"
-		CURL+=(--header "Content-Type: application/json")
-		CURL+=(--data-binary "$(jq "${QUERY_PARAMS[@]}" --from-file /dev/stdin "$CULT_EMPTY")")
-	fi
-
 	if [ -n "$CURRENT_TOKEN" ]; then
 		CURL+=(--header "Authorization: Bearer $CURRENT_TOKEN")
 	fi
@@ -186,8 +181,8 @@ auth() {
 
 			query --exit-status ".status == 200" >&2
 
-			CURRENT_TOKEN=$(query --exit-status .json.access_token)
-			CURRENT_TOKEN_EXPIRATION=$(query --exit-status ".json.expires_in + $(date '+%s')")
+			CURRENT_TOKEN=$(query --exit-status --raw-output .json.access_token)
+			CURRENT_TOKEN_EXPIRATION=$(query --exit-status --raw-output ".json.expires_in + $(date '+%s')")
 
 		fi
 
@@ -270,6 +265,22 @@ extract_variables() {
 	done
 }
 
+substitute_request_params() {
+	local VAR
+	local VARS
+	local PARAM
+
+	VARS=$(printf "\$%s " "${!CURRENT_VARIABLES[@]}")
+
+	for VAR in "${!CURRENT_VARIABLES[@]}"; do
+		declare -x "$VAR=${CURRENT_VARIABLES[$VAR]}"
+	done
+
+	for PARAM in "$@"; do
+		REQUEST_PARAMS+=("$(envsubst "${VARS[@]}" <<< "$PARAM")")
+	done
+}
+
 print_all() {
 	for PRINT in "${CULT_PRINT[@]}"; do
 		trace "[PRINT] $PRINT"
@@ -332,7 +343,6 @@ while true; do
 			LOCAL_ENV="$2"
 			shift
 			;;
-
 		-p | --print)
 			check_param "$@"
 			CULT_PRINT+=("$2")
@@ -420,8 +430,18 @@ logger "STEP"
 prepare_query_params
 
 if [ 0 -lt "$#" ]; then
+
 	auth
-	request "$@"
+
+	if [ ! -t 0 ]; then
+		echo '{}' > "$CULT_EMPTY"
+		REQUEST_PARAMS+=(--header "Content-Type: application/json")
+		REQUEST_PARAMS+=(--data-binary "$(jq "${QUERY_PARAMS[@]}" --from-file /dev/stdin "$CULT_EMPTY")")
+	fi
+
+	substitute_request_params "$@"
+
+	request "${REQUEST_PARAMS[@]}"
 fi
 
 assert_all
