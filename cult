@@ -10,6 +10,7 @@ set -o errexit -o nounset -o pipefail
 : "${CULT_BEGIN:=}"
 : "${CULT_USER:=}"
 : "${CULT_CLIENT:=}"
+: "${CULT_WAIT:=}"
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
@@ -139,10 +140,16 @@ request() {
 		echo
 	} >&2
 
-	STATUS=$("${CURL[@]}")
+	while true; do
+		STATUS=$("${CURL[@]}" || test -n "$CULT_WAIT")
+		[ "$STATUS" != '000' ] && break
+		sleep 1
+		logger "STEP"
+	done
+
 	JSON=$(jq < "$OUTPUT" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
 
-	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": $JSON }"
+	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": ${JSON:-\"\"} }"
 	trace "[RESPONSE] $CURRENT_RESPONSE"
 }
 
@@ -313,6 +320,7 @@ while true; do
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
+		-w | --wait) CULT_WAIT="1" ;;
 		--logout) LOGOUT="1" ;;
 		-a | --assert)
 			check_param "$@"
