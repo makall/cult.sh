@@ -333,7 +333,7 @@ while true; do
 		-r | --report) SHOW_REPORT="1" ;;
 		-w | --wait) CULT_WAIT="1" ;;
 		--logout) LOGOUT="1" ;;
-		-a | --assert)
+		-t | --test | -a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
 			shift
@@ -353,17 +353,17 @@ while true; do
 			CULT_VARIABLES["$2"]="$3"
 			shift 2
 			;;
-		-t | --test)
+		-s | --step | --test-step)
 			check_param "$@"
 			CULT_STEP="$2"
 			shift
 			;;
-		-c | --test-case)
+		-c | --case | --test-case)
 			check_param "$@"
 			CULT_CASE="Case: $2"
 			shift
 			;;
-		-s | --test-scenario)
+		-S | --scenario | --test-scenario)
 			check_param "$@"
 			CULT_SCENARIO="Scenario: $2"
 			shift
