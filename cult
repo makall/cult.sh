@@ -157,12 +157,19 @@ auth_setup() {
 	fi
 }
 
+throw() {
+	tint 31 " $FAIL" 0 " $*"
+	false
+}
+
 auth() {
 
 	auth_setup 'USER'
 	auth_setup 'CLIENT'
 
 	if [ -n "$CURRENT_CLIENT" ]; then
+
+		[ -n "${CLIENTS[$CURRENT_CLIENT]:-}" ] || throw "Client not defined: $CURRENT_CLIENT"
 
 		if [ -z "$CURRENT_TOKEN" ] || [ "$(date '+%s')" -gt "${CURRENT_TOKEN_EXPIRATION:-0}" ]; then
 
@@ -171,6 +178,7 @@ auth() {
 			CURRENT_TOKEN=''
 
 			if [ -n "$CURRENT_USER" ]; then
+				[ -n "${USERS[$CURRENT_USER]:-}" ] || throw "User not defined: $CURRENT_USER"
 				DATA="grant_type=password&username=$CURRENT_USER&password=${USERS[$CURRENT_USER]}"
 			fi
 
@@ -321,8 +329,7 @@ flush() {
 
 check_param() {
 	[ 1 -lt "$#" ] && return
-	tint 31 " $FAIL" 0 " '$1' parameter value is expected"
-	exit 1
+	throw "'$1' parameter value is expected"
 }
 
 while true; do
