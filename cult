@@ -184,7 +184,7 @@ auth() {
 
 			request "$TOKEN_ENDPOINT" \
 				--header 'Content-Type: application/x-www-form-urlencoded' \
-				--header "Authorization: Basic $(echo -n "$CURRENT_CLIENT:${CLIENTS[$CURRENT_CLIENT]}" | base64)" \
+				--header "Authorization: Basic $(echo -n "$CURRENT_CLIENT:${CLIENTS[$CURRENT_CLIENT]}" | base64 --wrap=0)" \
 				--data-raw "$DATA"
 
 			query --exit-status ".status == 200" >&2
