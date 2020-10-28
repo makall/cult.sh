@@ -57,7 +57,7 @@ cleanup() {
 	tint 33 ' / /___\ \_/ /' 0 ' | ' 33 '/ /___  / /' 0 ' |  __/\__ \ ||  __/ |'
 	tint 33 ' \____/ \___/' 0 '|_| ' 33 '\____/  \/' 0 '   \___||___/\__\___|_|\n'
 
-	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_ENV"
+	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_CACHE"
 	echo -n > "$CULT_TRACE"
 	echo -n > "$CULT_LOG"
 }
@@ -316,7 +316,7 @@ flush() {
 
 	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
 		declare -p "$CURRENT"
-	done > "$CULT_ENV"
+	done > "$CULT_CACHE"
 
 	exec 1>&4
 	exec 2>&5
@@ -396,10 +396,14 @@ done
 
 [ "$(ps -o stat= -p $$)" = "$(ps -o stat= -p $PPID)" ] || STANDALONE="1"
 
-CULT_ENV="/tmp/$(basename "$0").env"
-CULT_LOG="/tmp/$(basename "$0").log"
-CULT_EMPTY="/tmp/$(basename "$0").empty"
-CULT_TRACE="/tmp/$(basename "$0").trace"
+CULT_TEMP_DIR="/tmp/cult"
+
+mkdir -p "$CULT_TEMP_DIR"
+
+CULT_LOG="$CULT_TEMP_DIR/log"
+CULT_CACHE="$CULT_TEMP_DIR/cache"
+CULT_EMPTY="$CULT_TEMP_DIR/empty"
+CULT_TRACE="$CULT_TEMP_DIR/trace"
 
 OUTPUT=$(mktemp)
 TRACE_ID="${OUTPUT#*.}"
@@ -410,7 +414,7 @@ touch "$CULT_LOG"
 [ -n "$CULT_BEGIN" ] && cleanup
 
 # shellcheck disable=SC1090
-[ -f "$CULT_ENV" ] && . "$CULT_ENV"
+[ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
 
 # shellcheck disable=SC1090
 [ -f "$LOCAL_ENV" ] && . "$LOCAL_ENV"
