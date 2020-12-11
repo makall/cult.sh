@@ -268,7 +268,7 @@ assert_all() {
 extract_variables() {
 	for VARIABLE in "${!CULT_VARIABLES[@]}"; do
 		trace "[VARIABLE] $VARIABLE"
-		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
+		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}" || echo null)
 		trace "[VARIABLE] $VARIABLE=${CURRENT_VARIABLES["$VARIABLE"]}"
 	done
 }
