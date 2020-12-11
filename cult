@@ -363,17 +363,17 @@ while true; do
 			;;
 		-s | --step | --test-step)
 			check_param "$@"
-			CULT_STEP="$2"
+			CULT_STEP="           $2"
 			shift
 			;;
 		-c | --case | --test-case)
 			check_param "$@"
-			CULT_CASE="Case: $2"
+			CULT_CASE="     Case: $2"
 			shift
 			;;
 		-S | --scenario | --test-scenario)
 			check_param "$@"
-			CULT_SCENARIO="Scenario: $2"
+			CULT_SCENARIO=" Scenario: $2"
 			shift
 			;;
 		-u | --user)
