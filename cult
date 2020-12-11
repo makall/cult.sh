@@ -234,7 +234,7 @@ report() {
 		Assertions : $ASSERTIONS : $((ASSERTIONS - SUCCESSES))
 	EOF
 
-	echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
+	[ -n "${CURRENT_BEGIN:-}" ] && echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
 
 	tint 37 '\nResult\n'
 
