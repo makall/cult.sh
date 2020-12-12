@@ -7,7 +7,6 @@
 
 set -o errexit -o nounset -o pipefail
 
-: "${CULT_BEGIN:=}"
 : "${CULT_USER:=}"
 : "${CULT_CLIENT:=}"
 : "${CULT_WAIT:=}"
@@ -30,8 +29,9 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_TOKEN:=}"
 : "${CURRENT_TOKEN_EXPIRATION:=}"
 
-: "${STANDALONE:=}"
 : "${LOGOUT:=}"
+: "${FAILED:=0}"
+: "${STANDALONE:=}"
 : "${LOG_OFFSET:=0}"
 
 declare -a REQUEST_PARAMS
@@ -42,25 +42,34 @@ declare -A CULT_VARIABLES
 declare -A CURRENT_VARIABLES
 
 FAIL='\u2717'
+WARN='\u25CF'
+INFO='\u2714'
 STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
-SUCCESS='\u2714'
 
 tint() {
 	printf "\e[%d;1m%b\e[m" "$@"
 	echo
 }
 
-cleanup() {
-
+logo() {
 	tint 33 '    ___             __   _____          ' 0 '_'
 	tint 33 "   / __\/\ /\\" 0 ' _ __ ' 33 "/ /  /__   \\" 0 '___  ___| |_ ___ _ __'
 	tint 33 "  / /  / / \ \\" 0 " '__" 33 '/ /     / /\/' 0 " _ \/ __| __/ _ \ '__|"
 	tint 33 ' / /___\ \_/ /' 0 ' | ' 33 '/ /___  / /' 0 ' |  __/\__ \ ||  __/ |'
 	tint 33 ' \____/ \___/' 0 '|_| ' 33 '\____/  \/' 0 '   \___||___/\__\___|_|\n'
+}
 
+cleanup() {
 	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_CACHE"
 	echo -n > "$CULT_TRACE"
 	echo -n > "$CULT_LOG"
+}
+
+setup() {
+	# shellcheck disable=SC2064
+	trap "FAILED=\$? CALLER='$0' $(realpath "${BASH_SOURCE[0]}") --report" EXIT
+	exec > >(tee --append "$CULT_LOG")
+	exec 2>&1
 }
 
 trace() {
@@ -96,11 +105,11 @@ logger() {
 		if [ -n "$FAILED" ]; then
 			ICON=$(tint 31 "$FAIL")
 		elif [ -n "${FLUSH:-}" ]; then
-			ICON=$(tint 32 "$SUCCESS")
+			ICON=$(tint 32 "$INFO")
 		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
 			ICON=$(tint 33 "${STEPS[$((${!CURRENT_ICON} % "${#STEPS[@]}"))]}")
 		else
-			ICON=$(tint 32 "$SUCCESS")
+			ICON=$(tint 32 "$INFO")
 		fi
 
 		POS=$((CURRENT_LOG_SIZE - ${!CURRENT_LINE} + 1))
@@ -220,7 +229,7 @@ report() {
 	RESPONSES=$(count 'REQUEST')
 
 	ASSERTIONS=$(count 'ASSERT')
-	SUCCESSES=$(count 'SUCCESS')
+	SUCCESSES=$(count 'INFO')
 
 	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
 
@@ -239,10 +248,12 @@ report() {
 
 	tint 37 '\nResult\n'
 
-	if [ 0 -eq "$FAILS" ]; then
-		tint 32 " $SUCCESS SUCCEEDED\n"
-	else
+	if [ 0 -eq "$FAILS" ] && [ 0 -eq "$FAILED" ]; then
+		tint 32 " $INFO SUCCEEDED\n"
+	elif [ 0 -eq "$FAILED" ]; then
 		tint 31 " $FAIL FAILED\n"
+	else
+		tint 33 " $WARN $CALLER script existed with an error\n"
 	fi
 
 	exit "$FAILS"
@@ -262,7 +273,7 @@ assert_all() {
 	for ASSERT in "${CULT_ASSERT[@]}"; do
 		trace "[ASSERT] $ASSERT"
 		query --exit-status "$ASSERT" >&2
-		trace "[SUCCESS] $ASSERT"
+		trace "[INFO] $ASSERT"
 	done
 }
 
@@ -319,8 +330,7 @@ flush() {
 		declare -p "$CURRENT"
 	done > "$CULT_CACHE"
 
-	exec 1>&4
-	exec 2>&5
+	exec 2>&"$SAVED_STDERR"
 
 	[ -z "$CULT_FAIL" ] || fail
 	[ -z "$SHOW_REPORT" ] || report
@@ -335,7 +345,6 @@ check_param() {
 
 while true; do
 	case "${1:-}" in
-		-b | --begin) CULT_BEGIN="1" ;;
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
 		-r | --report) SHOW_REPORT="1" ;;
@@ -406,13 +415,20 @@ CULT_CACHE="$CULT_TEMP_DIR/cache"
 CULT_EMPTY="$CULT_TEMP_DIR/empty"
 CULT_TRACE="$CULT_TEMP_DIR/trace"
 
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+	cleanup
+	setup
+	logo
+	return
+elif [ -n "$STANDALONE" ]; then
+	exec > >(tee --append "$CULT_LOG")
+fi
+
 OUTPUT=$(mktemp)
 TRACE_ID="${OUTPUT#*.}"
 
 trap 'flush' EXIT
 touch "$CULT_LOG"
-
-[ -n "$CULT_BEGIN" ] && cleanup
 
 # shellcheck disable=SC1090
 [ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
@@ -432,8 +448,7 @@ if [ -n "$LOGOUT" ]; then
 	CURRENT_USER=''
 fi
 
-exec 4>&1 > >(tee --append "$CULT_LOG")
-exec 5>&2 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
+exec {SAVED_STDERR}>&2 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 logger "SCENARIO"
 logger "CASE"
