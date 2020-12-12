@@ -18,7 +18,6 @@ set -o errexit -o nounset -o pipefail
 
 : "${SHOW_LOG:=}"
 : "${SHOW_HELP:=}"
-: "${SHOW_REPORT:=}"
 
 : "${CURRENT_STEP:=}"
 : "${CURRENT_CASE:=}"
@@ -40,6 +39,7 @@ declare -a CULT_ASSERT
 declare -a CULT_PRINT
 declare -A CULT_VARIABLES
 declare -A CURRENT_VARIABLES
+declare -a CURRENT_STACK
 
 FAIL='\u2717'
 WARN='\u25CF'
@@ -67,7 +67,6 @@ cleanup() {
 
 setup() {
 	# shellcheck disable=SC2064
-	trap "FAILED=\$? CALLER='$0' $(realpath "${BASH_SOURCE[0]}") --report" EXIT
 	exec > >(tee --append "$CULT_LOG")
 	exec 2>&1
 }
@@ -220,10 +219,13 @@ entry() {
 report() {
 
 	local FAILS
+	local FAILED="$1"
 	local REQUESTS
 	local RESPONSES
 	local ASSERTIONS
 	local SUCCESSES
+
+	. "$CULT_CACHE"
 
 	REQUESTS=$(count 'REQUEST')
 	RESPONSES=$(count 'REQUEST')
@@ -232,6 +234,17 @@ report() {
 	SUCCESSES=$(count 'INFO')
 
 	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
+	FAILED=$((FAILED + FAILS))
+
+	if [ 0 -eq "$FAILED" ] && [ 1 -lt "${#CURRENT_STACK[@]}" ]; then
+		unset CURRENT_STACK[-1]
+		persist_cache
+		return "$FAILED"
+	elif [ 0 -eq "${#CURRENT_STACK[@]}" ]; then
+		return "$FAILED"
+	fi
+
+	flush 0 1
 
 	tint 37 "\nReport\n"
 
@@ -248,15 +261,18 @@ report() {
 
 	tint 37 '\nResult\n'
 
-	if [ 0 -eq "$FAILS" ] && [ 0 -eq "$FAILED" ]; then
+	if [ 0 -eq "$FAILED" ]; then
 		tint 32 " $INFO SUCCEEDED\n"
-	elif [ 0 -eq "$FAILED" ]; then
+	elif [ 0 -ne "$FAILS" ]; then
 		tint 31 " $FAIL FAILED\n"
 	else
-		tint 33 " $WARN $CALLER script existed with an error\n"
+		tint 33 " $WARN ${CURRENT_STACK[-1]} script existed with an error\n"
 	fi
 
-	exit "$FAILS"
+	CURRENT_STACK=()
+	persist_cache
+
+	return "$FAILED"
 }
 
 prepare_query_params() {
@@ -308,14 +324,16 @@ print_all() {
 	done
 }
 
-fail() {
-	tint 37 "\nTrace\n"
-	sed -n "s/^$TRACE_ID://p" "$CULT_TRACE"
+persist_cache() {
+	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+		declare -p "$CURRENT"
+	done > "$CULT_CACHE"
 }
 
 flush() {
 
 	local CULT_FAIL="${?%0}"
+	local SHOW_REPORT="${2:-}"
 	local CULT_FLUSH="1"
 
 	if [ -n "$CULT_FAIL" ] || [ -n "$SHOW_REPORT" ]; then
@@ -326,14 +344,13 @@ flush() {
 		CULT_STEP='' logger "STEP"
 	fi
 
-	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
-		declare -p "$CURRENT"
-	done > "$CULT_CACHE"
+	persist_cache
 
-	exec 2>&"$SAVED_STDERR"
-
-	[ -z "$CULT_FAIL" ] || fail
-	[ -z "$SHOW_REPORT" ] || report
+	if [ -n "$CULT_FAIL" ]; then
+		exec 2>&"$SAVED_STDERR"
+		tint 37 "\nTrace\n"
+		sed -n "s/^$TRACE_ID://p" "$CULT_TRACE"
+	fi
 
 	return "$?$CULT_FAIL"
 }
@@ -347,7 +364,6 @@ while true; do
 	case "${1:-}" in
 		-l | --log) SHOW_LOG="1" ;;
 		-h | --help) SHOW_HELP="1" ;;
-		-r | --report) SHOW_REPORT="1" ;;
 		-w | --wait) CULT_WAIT="1" ;;
 		--logout) LOGOUT="1" ;;
 		-t | --test | -a | --assert)
@@ -416,9 +432,21 @@ CULT_EMPTY="$CULT_TEMP_DIR/empty"
 CULT_TRACE="$CULT_TEMP_DIR/trace"
 
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
-	cleanup
-	setup
-	logo
+
+	if [ 2 -eq "$SHLVL" ]; then
+		cleanup
+		setup
+		logo
+	fi
+
+	# shellcheck disable=SC1090
+	. "$CULT_CACHE"
+	CURRENT_STACK+=("$0")
+	persist_cache
+
+	# shellcheck disable=SC2064
+	trap "${1:-false} || report \$?" EXIT
+
 	return
 elif [ -n "$STANDALONE" ]; then
 	exec > >(tee --append "$CULT_LOG")

@@ -5,9 +5,7 @@ TEST_COUNT="${1:-0}"
 
 cd "$(dirname "$0")" || exit
 
-if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
-	. ./cult
-fi
+. ./cult
 
 ./cult \
 	--case "Test case $TEST_COUNT" \
@@ -32,7 +30,6 @@ echo "Some comment"
 
 echo "Some text on stderr" >&2
 
-echo "$blah"
 ./cult --case 'My Case'
 echo "Another comment"
 
