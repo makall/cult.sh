@@ -12,7 +12,7 @@ cd "$(dirname "$0")" || exit
 	--step "My Test $TEST_COUNT B" \
 	--test '.json.hello == "world"' \
 	--test '.json.tester == "curl"' \
-	--test '.status == 200' \
+	--test ".status == 200" \
 	'http://echo.jsontest.com/hello/world/tester/curl'
 
 ./cult --step "My Test $TEST_COUNT C" -v myIP '.json' --assert '.status == 200' 'http://ifconfig.me'
@@ -30,8 +30,10 @@ echo "Some comment"
 
 echo "Some text on stderr" >&2
 
+
 ./cult --case 'My Case'
 echo "Another comment"
 
+#echo "$blah"
 ./cult --step 'My Step'
 echo "Last comment"

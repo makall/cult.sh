@@ -13,7 +13,11 @@ cd "$(dirname "$0")" || exit
 ./test.sh 3
 
 ./cult --step "My Test 4 A"
+sleep 1
 ./cult --step "My Test 4 A"
+sleep 1
 ./cult --step "My Test 4 A"
+sleep 1
 ./cult --step "My Test 4 A"
+sleep 1
 ./cult --step "My Test 4 A"
