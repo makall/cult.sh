@@ -208,28 +208,30 @@ report() {
 
 	CULT_FAIL="$?"
 
-	# Is the last script?
+	exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
+
+	REQUESTS=$(count 'REQUEST')
+	RESPONSES=$(count 'REQUEST')
+
+	ASSERTIONS=$(count 'ASSERT')
+	SUCCESSES=$(count 'INFO')
+
+	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
+
+	# shellcheck disable=SC1090
+	. "$CULT_CACHE"
+
+	CULT_FAIL=$((CULT_FAIL + FAILS))
+	CULT_FLUSH='1'
+
+	CULT_STEP='' logger "STEP"
+	CULT_CASE='' logger "CASE"
+	CULT_SCENARIO='' logger "SCENARIO"
+
+	flush
+
+	# Show report only at the end of the root script
 	if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
-
-		exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
-
-		REQUESTS=$(count 'REQUEST')
-		RESPONSES=$(count 'REQUEST')
-
-		ASSERTIONS=$(count 'ASSERT')
-		SUCCESSES=$(count 'INFO')
-
-		FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
-
-		# shellcheck disable=SC1090
-		. "$CULT_CACHE"
-
-		CULT_FAIL=$((CULT_FAIL + FAILS))
-		CULT_FLUSH='1'
-
-		CULT_STEP='' logger "STEP"
-		CULT_CASE='' logger "CASE"
-		CULT_SCENARIO='' logger "SCENARIO"
 
 		tint 37 "\nReport\n"
 
