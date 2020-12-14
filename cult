@@ -3,6 +3,7 @@
 #  CUrL Tester
 #  A simple REST test framework for shell script.
 #
+# shellcheck disable=SC1090
 # vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
 
 set -o errexit -o nounset -o pipefail
@@ -34,8 +35,6 @@ declare -a CULT_PRINT
 declare -A CULT_VARIABLES
 declare -A CURRENT_VARIABLES
 
-CULT_FAIL=0
-
 FAIL_ICON=$'\e[31;1m\u2717\e[m'
 WARN_ICON=$'\e[33;1m\u25CF\e[m'
 INFO_ICON=$'\e[32;1m\u2714\e[m'
@@ -65,49 +64,43 @@ setup() {
 	exec 2>&1
 }
 
-trace() {
-	echo "$*" >&2
-}
-
 logger() {
 
+	local LOG_SIZE
+	local FAILED="${2:-0}"
+	local REPORT="${3:-0}"
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
+	local CURRENT_LINE="CURRENT_$1_LINE"
 
-	[ -n "${!CULT_ITEM}" ] && trace "[$1] ${!CULT_ITEM}"
-	[ 0 -ne "$CULT_FAIL" ] && [ -n "${!CURRENT_ITEM}" ] && trace "[$1:FAILED] ${!CURRENT_ITEM}"
+	[ -n "${!CULT_ITEM}" ] && echo "[$1] ${!CULT_ITEM}" >&"$TRACE"
+	[ 0 -ne "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && echo "[$1:FAILED] ${!CURRENT_ITEM}" >&"$TRACE"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
 		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
 		declare -g 'CURRENT_ICON=0'
 	fi
 
+	LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+
 	if [ -n "${!CURRENT_ITEM}" ]; then
 
 		local ICON="$INFO_ICON"
-		local QUERY="\e\[33;1m.*${!CURRENT_ITEM}"
+		local POS=$((1 + LOG_SIZE - ${!CURRENT_LINE}))
 
-		local FOUND
-		FOUND=$(tac "$CULT_LOG" | grep -nP "$QUERY" | head -n 1 || true)
-
-		if [ -n "$FOUND" ]; then
-
-			local POS
-			POS=$(cut -d: -f1 <<< "$FOUND")
-
-			if [ 0 -ne "$CULT_FAIL" ]; then
-				ICON="$FAIL_ICON"
-			elif [ -n "${CULT_FLUSH:-}" ]; then
-				ICON="$INFO_ICON"
-			elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
-				ICON="${STEP_ICONS[$((CURRENT_ICON % "${#STEP_ICONS[@]}"))]}"
-			fi
-
-			echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
+		if [ 0 -ne "$FAILED" ]; then
+			ICON="$FAIL_ICON"
+		elif [ 0 -ne "$REPORT" ]; then
+			ICON="$INFO_ICON"
+		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
+			ICON="${STEP_ICONS[$((CURRENT_ICON % "${#STEP_ICONS[@]}"))]}"
 		fi
+
+		echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
 	fi
 
-	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+	if [ 0 -ne "$FAILED" ] || [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+		declare -g "$CURRENT_LINE=$LOG_SIZE"
 		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
 	fi
 }
@@ -128,19 +121,19 @@ request() {
 		echo -n "[REQUEST] ${CURL[0]}"
 		printf " %q" "${CURL[@]:1}"
 		echo
-	} >&2
+	} >&"$TRACE"
 
 	while true; do
-		STATUS=$("${CURL[@]}" || test -n "$CULT_WAIT")
+		STATUS=$("${CURL[@]}" 2>&"$TRACE" || test -n "$CULT_WAIT")
 		[ "$STATUS" != '000' ] && break
 		sleep 1
 		logger "STEP"
 	done
 
-	JSON=$(jq < "$OUTPUT" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
+	JSON=$(jq < "$OUTPUT" 2>&$"$TRACE" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
 
 	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": ${JSON:-\"\"} }"
-	trace "[RESPONSE] $CURRENT_RESPONSE"
+	echo "[RESPONSE] $CURRENT_RESPONSE" >&"$TRACE"
 }
 
 auth_setup() {
@@ -204,9 +197,7 @@ entry() {
 
 report() {
 
-	CULT_FAIL="$?"
-
-	exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
+	local FAILED="$?"
 
 	REQUESTS=$(count 'REQUEST')
 	RESPONSES=$(count 'REQUEST')
@@ -216,17 +207,9 @@ report() {
 
 	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
 
-	# shellcheck disable=SC1090
 	. "$CULT_CACHE"
 
-	CULT_FAIL=$((CULT_FAIL + FAILS))
-	CULT_FLUSH='1'
-
-	CULT_STEP='' logger "STEP"
-	CULT_CASE='' logger "CASE"
-	CULT_SCENARIO='' logger "SCENARIO"
-
-	flush
+	flush '0' '1' || true
 
 	# Show report only at the end of the root script
 	if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
@@ -246,17 +229,17 @@ report() {
 
 		echo -e $'\n\e[37;1mResult\e[m\n'
 
-		if [ 0 -eq "$CULT_FAIL" ]; then
-			echo -e " $INFO_ICON SUCCEEDED\n"
-		elif [ 0 -ne "$FAILS" ]; then
+		if [ 0 -ne "$FAILS" ]; then
 			echo -e " $FAIL_ICON FAILED\n"
+		elif [ 0 -ne "$FAILED" ]; then
+			echo -e " $WARN_ICON Script existed with an error\n"
 		else
-			echo -e " $WARN_ICON script existed with an error"
+			echo -e " $INFO_ICON SUCCEEDED\n"
 		fi
 
 	fi
 
-	return "$CULT_FAIL"
+	return "$FAILED"
 }
 
 prepare_query_params() {
@@ -271,17 +254,16 @@ query() {
 
 assert_all() {
 	for ASSERT in "${CULT_ASSERT[@]}"; do
-		trace "[ASSERT] $ASSERT"
-		query --exit-status "$ASSERT" >&2
-		trace "[INFO] $ASSERT"
+		echo "[ASSERT] $ASSERT" >&"$TRACE"
+		query --exit-status "$ASSERT" >&"$TRACE"
+		echo "[INFO] $ASSERT" >&"$TRACE"
 	done
 }
 
 extract_variables() {
 	for VARIABLE in "${!CULT_VARIABLES[@]}"; do
-		trace "[VARIABLE] $VARIABLE"
+		echo "[VARIABLE] $VARIABLE" >&"$TRACE"
 		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}" || echo null)
-		trace "[VARIABLE] $VARIABLE=${CURRENT_VARIABLES["$VARIABLE"]}"
 	done
 }
 
@@ -303,20 +285,27 @@ substitute_request_params() {
 
 print_all() {
 	for PRINT in "${CULT_PRINT[@]}"; do
-		trace "[PRINT] $PRINT"
+		echo "[PRINT] $PRINT" >&"$TRACE"
 		query --color-output "$PRINT"
 	done
 }
 
 flush() {
 
-	CULT_FAIL="$?"
+	local FAILED="${1:-$?}"
+	local REPORT="${2:-0}"
+
+	if [ 0 -ne "$FAILED" ] || [ 0 -ne "$REPORT" ]; then
+		CULT_SCENARIO='' logger "SCENARIO" "$FAILED" "$REPORT"
+		CULT_CASE='' logger "CASE" "$FAILED" "$REPORT"
+		CULT_STEP='' logger "STEP" "$FAILED" "$REPORT"
+	fi
 
 	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
 		declare -p "$CURRENT"
 	done > "$CULT_CACHE"
 
-	return "$CULT_FAIL"
+	return "$FAILED"
 }
 
 check_param() {
@@ -393,6 +382,7 @@ CULT_TRACE="$CULT_TEMP_DIR/trace"
 
 OUTPUT=$(mktemp)
 TRACE_ID="${OUTPUT#*.}"
+exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 
@@ -408,10 +398,7 @@ fi
 
 trap 'flush' EXIT
 
-# shellcheck disable=SC1090
 [ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
-
-# shellcheck disable=SC1090
 [ -f "$CULT_ENV" ] && . "$CULT_ENV"
 
 if [ -n "$LOGOUT" ]; then
@@ -419,8 +406,6 @@ if [ -n "$LOGOUT" ]; then
 	CURRENT_TOKEN=''
 	CURRENT_USER=''
 fi
-
-exec 2> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 CURRENT_ICON=$((1 + ${CURRENT_ICON:-0}))
 

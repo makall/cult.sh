@@ -30,10 +30,11 @@ echo "Some comment"
 
 echo "Some text on stderr" >&2
 
-
 ./cult --case 'My Case'
 echo "Another comment"
 
 #echo "$blah"
 ./cult --step 'My Step'
 echo "Last comment"
+
+

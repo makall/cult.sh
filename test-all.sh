@@ -7,6 +7,12 @@ cd "$(dirname "$0")" || exit
 
 ./cult --scenario "My Test Scenario"
 
+./cult --step "Sucess"
+./cult --step "Fail" --test 'false' || true
+sleep 1
+./cult --step "Success again"
+sleep 1
+
 ./test.sh 1
 ./test.sh 2
 ./test.sh 3
@@ -18,6 +24,3 @@ sleep 1
 sleep 1
 ./cult --step "My Test 4 A"
 sleep 1
-./cult --step "My Test 4 A"
-sleep 1
-./cult --step "My Test 4 A"
