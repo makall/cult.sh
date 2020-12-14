@@ -36,22 +36,22 @@ declare -A CURRENT_VARIABLES
 
 CULT_FAIL=0
 
-FAIL='\u2717'
-WARN='\u25CF'
-INFO='\u2714'
-STEPS=('\u25cb' '\u25cf' '\u25cb' '\u25cc')
-
-tint() {
-	printf "\e[%d;1m%b\e[m" "$@"
-	echo
-}
+FAIL_ICON=$'\e[31;1m\u2717\e[m'
+WARN_ICON=$'\e[33;1m\u25CF\e[m'
+INFO_ICON=$'\e[32;1m\u2714\e[m'
+STEP_ICONS=(
+	$'\e[33;1m\u25cb\e[m'
+	$'\e[33;1m\u25cf\e[m'
+	$'\e[33;1m\u25cb\e[m'
+	$'\e[33;1m\u25cc\e[m'
+)
 
 logo() {
-	tint 33 '    ___             __   _____          ' 0 '_'
-	tint 33 "   / __\/\ /\\" 0 ' _ __ ' 33 "/ /  /__   \\" 0 '___  ___| |_ ___ _ __'
-	tint 33 "  / /  / / \ \\" 0 " '__" 33 '/ /     / /\/' 0 " _ \/ __| __/ _ \ '__|"
-	tint 33 ' / /___\ \_/ /' 0 ' | ' 33 '/ /___  / /' 0 ' |  __/\__ \ ||  __/ |'
-	tint 33 ' \____/ \___/' 0 '|_| ' 33 '\____/  \/' 0 '   \___||___/\__\___|_|\n'
+	echo -e $'\e[33;1m    ___             __   _____\e[m          _'
+	echo -e $'\e[33;1m   / __\/\ /\\\e[m _ __ \e[33;1m/ /  /__   \\\e[m___  ___| |_ ___ _ __'
+	echo -e $'\e[33;1m  / /  / / \ \\\e[m \'__\e[33;1m/ /     / /\/\e[m _ \/ __| __/ _ \ \'__|'
+	echo -e $'\e[33;1m / /___\ \_/ /\e[m | \e[33;1m/ /___  / /\e[m |  __/\__ \ ||  __/ |'
+	echo -e $'\e[33;1m \____/ \___/\e[m|_| \e[33;1m\____/  \/\e[m   \___||___/\__\___|_|\n'
 }
 
 cleanup() {
@@ -71,10 +71,6 @@ trace() {
 
 logger() {
 
-	local POS
-	local ICON
-	local FOUND
-
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
 
@@ -82,27 +78,29 @@ logger() {
 	[ 0 -ne "$CULT_FAIL" ] && [ -n "${!CURRENT_ITEM}" ] && trace "[$1:FAILED] ${!CURRENT_ITEM}"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		tint 33 " ${STEPS[0]}" 0 " ${!CULT_ITEM}"
+		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
 		declare -g 'CURRENT_ICON=0'
 	fi
 
 	if [ -n "${!CURRENT_ITEM}" ]; then
 
-		QUERY="\e\[33;1m.*${!CURRENT_ITEM}\e\[m"
+		local ICON="$INFO_ICON"
+		local QUERY="\e\[33;1m.*${!CURRENT_ITEM}"
+
+		local FOUND
 		FOUND=$(tac "$CULT_LOG" | grep -nP "$QUERY" | head -n 1 || true)
 
 		if [ -n "$FOUND" ]; then
 
+			local POS
 			POS=$(cut -d: -f1 <<< "$FOUND")
 
 			if [ 0 -ne "$CULT_FAIL" ]; then
-				ICON=$(tint 31 "$FAIL")
+				ICON="$FAIL_ICON"
 			elif [ -n "${CULT_FLUSH:-}" ]; then
-				ICON=$(tint 32 "$INFO")
+				ICON="$INFO_ICON"
 			elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
-				ICON=$(tint 33 "${STEPS[$((CURRENT_ICON % "${#STEPS[@]}"))]}")
-			else
-				ICON=$(tint 32 "$INFO")
+				ICON="${STEP_ICONS[$((CURRENT_ICON % "${#STEP_ICONS[@]}"))]}"
 			fi
 
 			echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
@@ -155,7 +153,7 @@ auth_setup() {
 }
 
 throw() {
-	tint 31 " $FAIL" 0 " $*"
+	echo -e " $FAIL_ICON $*"
 	false
 }
 
@@ -233,7 +231,7 @@ report() {
 	# Show report only at the end of the root script
 	if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
 
-		tint 37 "\nReport\n"
+		echo -e $'\n\e[37;1mReport\e[m\n'
 
 		cat <<- EOF | column -ts: | sed 's/^/ /'
 			Items : Executed : Failed
@@ -246,14 +244,14 @@ report() {
 
 		[ -n "${CURRENT_BEGIN:-}" ] && echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
 
-		tint 37 '\nResult\n'
+		echo -e $'\n\e[37;1mResult\e[m\n'
 
-		if [ 0 -eq "$((FAILS + CULT_FAIL))" ]; then
-			tint 32 " $INFO SUCCEEDED\n"
+		if [ 0 -eq "$CULT_FAIL" ]; then
+			echo -e " $INFO_ICON SUCCEEDED\n"
 		elif [ 0 -ne "$FAILS" ]; then
-			tint 31 " $FAIL FAILED\n"
+			echo -e " $FAIL_ICON FAILED\n"
 		else
-			tint 33 " $WARN script existed with an error\n"
+			echo -e " $WARN_ICON script existed with an error"
 		fi
 
 	fi
@@ -409,7 +407,6 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 fi
 
 trap 'flush' EXIT
-touch "$CULT_LOG"
 
 # shellcheck disable=SC1090
 [ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
