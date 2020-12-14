@@ -71,6 +71,7 @@ logger() {
 	local REPORT="${3:-0}"
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
+	local CURRENT_ICON="CURRENT_$1_ICON"
 	local CURRENT_LINE="CURRENT_$1_LINE"
 
 	[ -n "${!CULT_ITEM}" ] && echo "[$1] ${!CULT_ITEM}" >&"$TRACE"
@@ -78,7 +79,7 @@ logger() {
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
 		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
-		declare -g 'CURRENT_ICON=0'
+		declare -g "$CURRENT_ICON=1"
 	fi
 
 	LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
@@ -93,7 +94,8 @@ logger() {
 		elif [ 0 -ne "$REPORT" ]; then
 			ICON="$INFO_ICON"
 		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
-			ICON="${STEP_ICONS[$((CURRENT_ICON % "${#STEP_ICONS[@]}"))]}"
+			ICON="${STEP_ICONS[$((${!CURRENT_ICON} % "${#STEP_ICONS[@]}"))]}"
+			declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON}))"
 		fi
 
 		echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
@@ -406,8 +408,6 @@ if [ -n "$LOGOUT" ]; then
 	CURRENT_TOKEN=''
 	CURRENT_USER=''
 fi
-
-CURRENT_ICON=$((1 + ${CURRENT_ICON:-0}))
 
 logger "SCENARIO"
 logger "CASE"
