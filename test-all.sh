@@ -8,7 +8,7 @@ cd "$(dirname "$0")" || exit
 ./cult --scenario "My Test Scenario"
 
 ./cult --step "Sucess"
-./cult --step "Fail" --test 'false' || true
+#./cult --step "Fail" --test 'false' || true
 sleep 1
 ./cult --step "Success again"
 sleep 1

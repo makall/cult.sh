@@ -10,19 +10,15 @@ cd "$(dirname "$0")" || exit
 ./cult \
 	--case "Test case $TEST_COUNT" \
 	--step "My Test $TEST_COUNT B" \
-	--test '.json.hello == "world"' \
-	--test '.json.tester == "curl"' \
-	--test ".status == 200" \
+	--test '.hello == "world"' \
+	--test '.tester == "curl"' \
+	--var 'hello' '.hello' \
 	'http://echo.jsontest.com/hello/world/tester/curl'
-
-./cult --step "My Test $TEST_COUNT C" -v myIP '.json' --assert '.status == 200' 'http://ifconfig.me'
-
-./cult --step "My IP did not change" --test ".json == \$myIP" 'http://ifconfig.me'
 
 ./cult --print '.'
 
-./cult -a '.status == 200' -a ".json.json.hello == \$myIP" https://postman-echo.com/post <<- EOF
-	{ "hello": \$myIP }
+./cult -a '.json.hello == "world"' https://postman-echo.com/post <<- EOF
+	{ "hello": \$hello }
 EOF
 
 ./cult --scenario 'My Scenario'

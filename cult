@@ -8,23 +8,29 @@
 
 set -o errexit -o nounset -o pipefail
 
+: "${CULT_ENV:=.cult}"
+
 : "${CULT_USER:=}"
 : "${CULT_CLIENT:=}"
-: "${CULT_WAIT:=}"
+
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
 
-: "${CULT_ENV:=.cult}"
+: "${CULT_WAIT:=}"
+: "${CULT_EXPECT:=2..}"
 
 : "${CURRENT_STEP:=}"
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
-: "${CURRENT_RESPONSE:=}"
+
 : "${CURRENT_CLIENT:=}"
 : "${CURRENT_USER:=}"
 : "${CURRENT_TOKEN:=}"
 : "${CURRENT_TOKEN_EXPIRATION:=}"
+
+: "${CURRENT_STATUS:=}"
+: "${CURRENT_RESPONSE:=}"
 
 : "${LOGOUT:=}"
 
@@ -109,15 +115,10 @@ logger() {
 
 request() {
 
-	local JSON
 	local STATUS
+	local CURL=(curl --silent --verbose --write-out '%{http_code}' --output "$OUTPUT" "$@")
 
-	local CURL=(curl --silent --verbose "$@")
-	CURL+=(--write-out '%{http_code}' --output "$OUTPUT" --header "X-Cult-Trace-Id: $TRACE_ID")
-
-	if [ -n "$CURRENT_TOKEN" ]; then
-		CURL+=(--header "Authorization: Bearer $CURRENT_TOKEN")
-	fi
+	[ -n "$CURRENT_TOKEN" ] && CURL+=(--header "Authorization: Bearer $CURRENT_TOKEN")
 
 	{
 		echo -n "[REQUEST] ${CURL[0]}"
@@ -132,9 +133,9 @@ request() {
 		logger "STEP"
 	done
 
-	JSON=$(jq < "$OUTPUT" 2>&$"$TRACE" || jq --raw-input --slurp --ascii-output < "$OUTPUT")
+	CURRENT_STATUS="$STATUS"
+	CURRENT_RESPONSE="$(< "$OUTPUT")"
 
-	CURRENT_RESPONSE="{ \"status\": $STATUS, \"json\": ${JSON:-\"\"} }"
 	echo "[RESPONSE] $CURRENT_RESPONSE" >&"$TRACE"
 }
 
@@ -148,8 +149,8 @@ auth_setup() {
 }
 
 throw() {
-	echo -e " $FAIL_ICON $*"
-	false
+	echo -e " $FAIL_ICON $*" >&2
+	return 1
 }
 
 auth() {
@@ -197,6 +198,10 @@ entry() {
 	echo "$1 : $(count "$2") : $(count "$2:FAILED")"
 }
 
+title() {
+	echo -e "\n\e[37;1m${*}\e[m\n"
+}
+
 report() {
 
 	local FAILED="$?"
@@ -216,9 +221,9 @@ report() {
 	# Show report only at the end of the root script
 	if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
 
-		echo -e $'\n\e[37;1mReport\e[m\n'
+		title 'Report'
 
-		cat <<- EOF | column -ts: | sed 's/^/ /'
+		column -ts: <<- EOF | sed 's/^/ /'
 			Items : Executed : Failed
 			$(entry "Scenarios" "SCENARIO")
 			$(entry "Cases" "CASE")
@@ -229,7 +234,7 @@ report() {
 
 		[ -n "${CURRENT_BEGIN:-}" ] && echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
 
-		echo -e $'\n\e[37;1mResult\e[m\n'
+		title 'Result'
 
 		if [ 0 -ne "$FAILS" ]; then
 			echo -e " $FAIL_ICON FAILED\n"
@@ -250,8 +255,19 @@ prepare_query_params() {
 	done
 }
 
+fail() {
+	{
+		title "Response(${CURRENT_STATUS:-???}):"
+		echo -e "${CURRENT_RESPONSE:-<EMPTY>}\n"
+	} >&2
+	throw "$@"
+}
+
 query() {
-	jq "${QUERY_PARAMS[@]}" "$@" <<< "${CURRENT_RESPONSE:-{\}}"
+	local PARAMS=("${QUERY_PARAMS[@]}" "$@")
+	if ! jq "${PARAMS[@]}" <<< "${CURRENT_RESPONSE:-{\}}"; then
+		fail "Query failed: ${PARAMS[*]}\n"
+	fi
 }
 
 assert_all() {
@@ -264,8 +280,7 @@ assert_all() {
 
 extract_variables() {
 	for VARIABLE in "${!CULT_VARIABLES[@]}"; do
-		echo "[VARIABLE] $VARIABLE" >&"$TRACE"
-		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}" || echo null)
+		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
 	done
 }
 
@@ -287,7 +302,6 @@ substitute_request_params() {
 
 print_all() {
 	for PRINT in "${CULT_PRINT[@]}"; do
-		echo "[PRINT] $PRINT" >&"$TRACE"
 		query --color-output "$PRINT"
 	done
 }
@@ -324,7 +338,12 @@ while true; do
 			CULT_ASSERT+=("$2")
 			shift
 			;;
-		-e | --env)
+		-e | --expect)
+			check_param "$@"
+			CULT_EXPECT="$2"
+			shift
+			;;
+		-E | --env)
 			check_param "$@"
 			CULT_ENV="$2"
 			shift
@@ -428,6 +447,8 @@ if [ 0 -lt "$#" ]; then
 	substitute_request_params "$@"
 
 	request "${REQUEST_PARAMS[@]}"
+
+	grep -qE "$CULT_EXPECT" <<< "$CURRENT_STATUS" || fail "Status differs from expected [$CULT_EXPECT]."
 fi
 
 assert_all
