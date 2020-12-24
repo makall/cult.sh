@@ -8,11 +8,6 @@
 
 set -o errexit -o nounset -o pipefail
 
-: "${CULT_ENV:=.cult}"
-
-: "${CULT_USER:=}"
-: "${CULT_CLIENT:=}"
-
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
@@ -24,15 +19,8 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
 
-: "${CURRENT_CLIENT:=}"
-: "${CURRENT_USER:=}"
-: "${CURRENT_TOKEN:=}"
-: "${CURRENT_TOKEN_EXPIRATION:=}"
-
 : "${CURRENT_STATUS:=}"
 : "${CURRENT_RESPONSE:=}"
-
-: "${LOGOUT:=}"
 
 declare -a REQUEST_PARAMS
 declare -a QUERY_PARAMS
@@ -119,8 +107,6 @@ request() {
 	local STATUS
 	local CURL=(curl --silent --verbose --write-out '%{http_code}' --output "$OUTPUT" "$@")
 
-	[ -n "$CURRENT_TOKEN" ] && CURL+=(--header "Authorization: Bearer $CURRENT_TOKEN")
-
 	{
 		echo -n "[REQUEST] ${CURL[0]}"
 		printf " %q" "${CURL[@]:1}"
@@ -140,55 +126,9 @@ request() {
 	echo "[RESPONSE] $CURRENT_RESPONSE" >&"$TRACE"
 }
 
-auth_setup() {
-	local CULT_ITEM="CULT_$1"
-	local CURRENT_ITEM="CURRENT_$1"
-	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
-		CURRENT_TOKEN=''
-	fi
-}
-
 throw() {
 	echo -e " $FAIL_ICON $*" >&2
 	return 1
-}
-
-auth() {
-
-	auth_setup 'USER'
-	auth_setup 'CLIENT'
-
-	if [ -n "$CURRENT_CLIENT" ]; then
-
-		[ -n "${CLIENTS[$CURRENT_CLIENT]:-}" ] || throw "Client not defined: $CURRENT_CLIENT"
-
-		if [ -z "$CURRENT_TOKEN" ] || [ "$(date '+%s')" -gt "${CURRENT_TOKEN_EXPIRATION:-0}" ]; then
-
-			local DATA="grant_type=client_credentials"
-
-			CURRENT_TOKEN=''
-
-			if [ -n "$CURRENT_USER" ]; then
-				[ -n "${USERS[$CURRENT_USER]:-}" ] || throw "User not defined: $CURRENT_USER"
-				DATA="grant_type=password&username=$CURRENT_USER&password=${USERS[$CURRENT_USER]}"
-			fi
-
-			request "$TOKEN_ENDPOINT" \
-				--header 'Content-Type: application/x-www-form-urlencoded' \
-				--header "Authorization: Basic $(echo -n "$CURRENT_CLIENT:${CLIENTS[$CURRENT_CLIENT]}" | base64 --wrap=0)" \
-				--data-raw "$DATA"
-
-			query --exit-status ".status == 200" >&2
-
-			CURRENT_TOKEN=$(query --exit-status --raw-output .json.access_token)
-			CURRENT_TOKEN_EXPIRATION=$(query --exit-status --raw-output ".json.expires_in + $(date '+%s')")
-
-		fi
-
-	else
-		CURRENT_TOKEN=''
-	fi
 }
 
 count() {
@@ -335,7 +275,6 @@ check_param() {
 while true; do
 	case "${1:-}" in
 		-w | --wait) CULT_WAIT="1" ;;
-		--logout) LOGOUT="1" ;;
 		-t | --test | -a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
@@ -344,11 +283,6 @@ while true; do
 		-e | --expect)
 			check_param "$@"
 			CULT_EXPECT="$2"
-			shift
-			;;
-		-E | --env)
-			check_param "$@"
-			CULT_ENV="$2"
 			shift
 			;;
 		-p | --print)
@@ -374,16 +308,6 @@ while true; do
 		-S | --scenario | --test-scenario)
 			check_param "$@"
 			CULT_SCENARIO=" Scenario: $2"
-			shift
-			;;
-		-u | --user)
-			check_param "$@"
-			CULT_USER="$2"
-			shift
-			;;
-		-C | --client)
-			check_param "$@"
-			CULT_CLIENT="$2"
 			shift
 			;;
 		--)
@@ -423,13 +347,6 @@ fi
 trap 'flush' EXIT
 
 [ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
-[ -f "$CULT_ENV" ] && . "$CULT_ENV"
-
-if [ -n "$LOGOUT" ]; then
-	CURRENT_CLIENT=''
-	CURRENT_TOKEN=''
-	CURRENT_USER=''
-fi
 
 logger "SCENARIO"
 logger "CASE"
@@ -438,8 +355,6 @@ logger "STEP"
 prepare_query_params
 
 if [ 0 -lt "$#" ]; then
-
-	auth
 
 	if [ ! -t 0 ]; then
 		echo '{}' > "$CULT_EMPTY"
