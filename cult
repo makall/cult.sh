@@ -258,7 +258,7 @@ prepare_query_params() {
 
 fail() {
 	{
-		title "Response(${CURRENT_STATUS:-???}):"
+		title "Status \`${CURRENT_STATUS:-???}\`"
 		echo -e "${CURRENT_RESPONSE:-<EMPTY>}\n"
 	} >&2
 	throw "$@"
@@ -303,8 +303,10 @@ substitute_request_params() {
 
 print_all() {
 	for PRINT in "${CULT_PRINT[@]}"; do
+		title "Response \`$PRINT\`"
 		query --color-output "$PRINT"
-	done
+		echo
+	done | sed 's/^/    /'
 }
 
 flush() {
