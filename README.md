@@ -35,11 +35,14 @@ and test script setup. The example below does the same as above but with a prett
 cult --test '.ip_addr != null' --print '"I have an IP, therefore I am."' http://ifconfig.me/all.json
 ```
 
+To make assertions the `--test` argument is used, as shown above. It has the same syntax as `jq`, it is applied over the response
+and can be used multiple times.
+
 The `--print` argument is used to show some output, and it's not required. The idea is that there is nothing to be
 aware on successes, but errors will be shown in details.
 
-To make assertions the `--test` argument is used, as shown above. It has the same syntax as `jq`, it is applied over the response
-and can be used multiple times.
+Note that the `--print` param is an escaped string, this is because `--print` has the same syntax as `jq` and the string must be
+a JSON string.
 
 Implicitly *CULT* will test the response status code for success (2XX). This behavior can be changed using the argument `--expect`
 and passing to it the expected status code, ie: `--expect 500`.
