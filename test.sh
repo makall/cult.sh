@@ -1,36 +1,26 @@
 #!/usr/bin/env bash
-# vim: ts=2 sw=2 sts=2 expandtab smartindent smarttab
-
-TEST_COUNT="${1:-0}"
-
-cd "$(dirname "$0")" || exit
 
 . ./cult
 
+./cult --test '.ip != null' http://ip.jsontest.com/
+
 ./cult \
-	--case "Test case $TEST_COUNT" \
-	--step "My Test $TEST_COUNT B" \
-	--test '.hello == "world"' \
-	--test '.tester == "curl"' \
-	--var 'hello' '.hello' \
-	'http://echo.jsontest.com/hello/world/tester/curl'
+	--case "Should support comments in the body" \
+	'http://echo.jsontest.com/hello/world' <<- EOF
+		{
+			# ignoring comment
+			"hello": "world"
+		}
+	EOF
 
-./cult --print '.'
-
-./cult -a '.json.hello == "world"' https://postman-echo.com/post <<- EOF
-	{ "hello": \$hello }
-EOF
-
-./cult --scenario 'My Scenario'
-echo "Some comment"
-
-echo "Some text on stderr" >&2
-
-./cult --case 'My Case'
-echo "Another comment"
-
-#echo "$blah"
-./cult --step 'My Step'
-echo "Last comment"
-
-
+./cult \
+	--case "Should support comments in the body" \
+	'http://echo.jsontest.com/hello/world' <<- EOF
+		{
+			"fixed": "fixedValue",
+			"email": "!email",
+			"username": "!user_name",
+			"value": "!pyint{'max_value': 10}",
+			"cpf": "!cpf"
+		}
+	EOF

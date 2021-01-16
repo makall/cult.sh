@@ -19,6 +19,7 @@ set -o errexit -o nounset -o pipefail
 : "${CURRENT_CASE:=}"
 : "${CURRENT_SCENARIO:=}"
 
+: "${CURRENT_LANG:=pt_BR}"
 : "${CURRENT_STATUS:=}"
 : "${CURRENT_RESPONSE:=}"
 
@@ -196,6 +197,17 @@ prepare_query_params() {
 	done
 }
 
+parse_data() {
+	local DATA
+	DATA=$(jq "${QUERY_PARAMS[@]}" --from-file "$1" <(echo '{}'))
+	jq 'paths as $p | getpath($p) as $v | select($v | type == "string" and match("^!")) | [ $p | "." + join("."), $v | split("{") ] | flatten' <<< "$DATA" |
+		sed -E 's/^(\s+"\.[^,]+)\.([0-9]+)\./\1[\2]./; s/^(\s+")!/\1/; s/^(\s+)"(.+)}"$/\1{\2}/; s/^\[/(/; s/]$/),/' |
+		python -c "import faker; print(faker.Faker(['${CURRENT_LANG}']).json(data_columns=[$(< /dev/stdin)], num_rows=1))" |
+		jq --compact-output 'paths as $p | getpath($p) as $v | [ $p | join("."), $v ]' |
+		sed -E 's/^\[//; s/\]$//; s/^"([^"]+)",/\1=/; $!s/$/|/' |
+		jq --from-file /dev/stdin <(echo "$DATA") >&2
+}
+
 fail() {
 	{
 		title "Status \`${CURRENT_STATUS:-???}\`"
@@ -277,6 +289,11 @@ TRACE_ID="${OUTPUT#*.}"
 
 while true; do
 	case "${1:-}" in
+		-l | --lang)
+			check_param "$@"
+			CURRENT_LANG="$2"
+			shift
+			;;
 		-o | --output)
 			check_param "$@"
 			OUTPUT="$2"
@@ -333,7 +350,6 @@ mkdir -p "$CULT_TEMP_DIR"
 
 CULT_LOG="$CULT_TEMP_DIR/log"
 CULT_CACHE="$CULT_TEMP_DIR/cache"
-CULT_EMPTY="$CULT_TEMP_DIR/empty"
 CULT_TRACE="$CULT_TEMP_DIR/trace"
 
 exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
@@ -365,9 +381,8 @@ prepare_query_params
 if [ 0 -lt "$#" ]; then
 
 	if [ ! -t 0 ]; then
-		echo '{}' > "$CULT_EMPTY"
 		REQUEST_PARAMS+=(--header "Content-Type: application/json")
-		REQUEST_PARAMS+=(--data-binary "$(jq "${QUERY_PARAMS[@]}" --from-file /dev/stdin "$CULT_EMPTY")")
+		REQUEST_PARAMS+=(--data-binary "$(parse_data /dev/stdin)")
 	fi
 
 	substitute_request_params "$@"
