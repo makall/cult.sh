@@ -272,8 +272,16 @@ check_param() {
 	throw "'$1' parameter value is expected"
 }
 
+OUTPUT=$(mktemp)
+TRACE_ID="${OUTPUT#*.}"
+
 while true; do
 	case "${1:-}" in
+		-o | --output)
+			check_param "$@"
+			OUTPUT="$2"
+			shift
+			;;
 		-w | --wait) CULT_WAIT="1" ;;
 		-t | --test | -a | --assert)
 			check_param "$@"
@@ -328,8 +336,6 @@ CULT_CACHE="$CULT_TEMP_DIR/cache"
 CULT_EMPTY="$CULT_TEMP_DIR/empty"
 CULT_TRACE="$CULT_TEMP_DIR/trace"
 
-OUTPUT=$(mktemp)
-TRACE_ID="${OUTPUT#*.}"
 exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 touch "$CULT_LOG"
