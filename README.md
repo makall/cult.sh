@@ -27,7 +27,7 @@ In the world of Shell Script, [curl](https://curl.se/) and [jq](https://stedolan
 are the common solution for making HTTP requests and verifying its JSON responses, ex:
 
 ```shell
-curl --silent 'http://ifconfig.me/all.json' | jq --exit-status '.ip_addr != null' > /dev/null && echo 'I have an IP, therefore I am.'
+curl --silent http://ifconfig.me/all.json | jq --exit-status '.ip_addr != null' > /dev/null && echo I have an IP, therefore I am.
 ```
 
 *Cult* embeds both tools and adds to them more features, such as test labeling and report, variable extraction, status
@@ -37,20 +37,16 @@ validation and test script setup. The example below does the same as above but w
 cult --test '.ip_addr != null' --print '"I have an IP, therefore I am."' http://ifconfig.me/all.json
 ```
 
-To make assertions the `--test` argument is used, as shown above. It has the same syntax as `jq`, it is applied over the
-response and can be used multiple times.
+To make assertions the `--test` argument is used, as shown above. Its content is used as `jq` filters over the response.
 
 The `--print` argument is used to show some output, and it's not required. The idea is that there is nothing to be aware
 on successes, but errors will be shown in details.
 
-Note that the `--print` parameter is an escaped string, this is because `--print` has the same syntax as `jq` and the
-string must be a JSON string. A nicer example would be `cult --print '.ip_addr' http://ifconfig.me/all.json`.
+Note that the `--print` parameter is an escaped string as it uses the `jq` filters to show its content.
 
 Implicitly *cult* will test the response status code for success (2XX). This behavior can be changed using the
 argument `--expect` and passing to it the expected status code, ie: `--expect 500`. The argument for the `--expect`
-parameter follow the `grep regex` syntax.
-
-If a post processing is required on response data the `--output <output-filename>` parameter can be used.
+parameter follow the `grep` regex syntax.
 
 Other features are suited for scripts, so they will be shown this way.
 
@@ -83,6 +79,50 @@ Output example:
  ✔  Scenario: My test scenario
  ✔      Case: My test case
  ✔            Yeah, I know =/
+```
+
+### Request Body
+
+Any data sent to *cult* will be parsed and added as *curl* `--raw-data` parameter. This approach was chooses to make
+easy to pass the request body as [heredoc](https://tldp.org/LDP/abs/html/here-docs.html), ex:
+
+```bash
+cult http://example.com << EOF
+    { "Hello": "World" }
+EOF
+```
+
+### Variables
+
+*Cult* can store response content into variables to future usage. Its first parameter is the variable name, and the
+second is the `jq` filter that will be used to extract the response content.
+
+```bash
+cult --var my_ip .ip_addr http://ifconfig.me/all.json
+```
+
+Once the variable is extracted, it can be used as parameters and at the request body, any content found with the
+variable name preceded by the dollar sign will be replaced by the variable value, ex:
+
+```bash
+cult --print $my_ip
+```
+
+### Random data
+
+*Cult* makes use of [faker](https://faker.readthedocs.io/en/master/index.html) to put random data into the request body.
+The exclamation mark at the beginning of the value indicates a `faker` method as shown bellow. If required arguments can
+be passed to the method as a [python dictionary](https://docs.python.org/3/tutorial/datastructures.html#dictionaries)
+after the method name, ex:
+
+```bash
+cult http://example.com << EOF
+    {
+        "username": "!user_name",
+        "email": "!email",
+        "value": "!random_int{'min': 100, 'max': 500}"
+    }
+EOF
 ```
 
 ## Installation
