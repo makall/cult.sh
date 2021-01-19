@@ -27,7 +27,9 @@ declare -a QUERY_PARAMS
 declare -a CULT_ASSERT
 declare -a CULT_PRINT
 declare -A CULT_VARIABLES
+declare -A CULT_VARIABLES_JSON
 declare -A CURRENT_VARIABLES
+declare -A CURRENT_VARIABLES_JSON
 
 FAIL_ICON=$'\e[31;1m\u2717\e[m'
 WARN_ICON=$'\e[33;1m\u25CF\e[m'
@@ -191,8 +193,14 @@ report() {
 }
 
 prepare_query_params() {
+	local VARIABLE
+
 	for VARIABLE in "${!CURRENT_VARIABLES[@]}"; do
 		QUERY_PARAMS+=(--arg "$VARIABLE" "${CURRENT_VARIABLES["$VARIABLE"]}")
+	done
+
+	for VARIABLE in "${!CURRENT_VARIABLES_JSON[@]}"; do
+		QUERY_PARAMS+=(--argjson "$VARIABLE" "${CURRENT_VARIABLES_JSON["$VARIABLE"]}")
 	done
 }
 
@@ -238,8 +246,14 @@ assert_all() {
 }
 
 extract_variables() {
+	local VARIABLE
+
 	for VARIABLE in "${!CULT_VARIABLES[@]}"; do
 		CURRENT_VARIABLES["$VARIABLE"]=$(query --raw-output "${CULT_VARIABLES["$VARIABLE"]}")
+	done
+
+	for VARIABLE in "${!CULT_VARIABLES_JSON[@]}"; do
+		CURRENT_VARIABLES_JSON["$VARIABLE"]=$(query --compact-output "${CULT_VARIABLES_JSON["$VARIABLE"]}")
 	done
 }
 
@@ -248,10 +262,14 @@ substitute_request_params() {
 	local VARS
 	local PARAM
 
-	VARS=$(printf "\$%s " "${!CURRENT_VARIABLES[@]}")
+	VARS=$(printf "\$%s " "${!CURRENT_VARIABLES[@]}" "${!CURRENT_VARIABLES_JSON[@]}")
 
 	for VAR in "${!CURRENT_VARIABLES[@]}"; do
 		declare -x "$VAR=${CURRENT_VARIABLES[$VAR]}"
+	done
+
+	for VAR in "${!CURRENT_VARIABLES_JSON[@]}"; do
+		declare -x "$VAR=${CURRENT_VARIABLES_JSON[$VAR]}"
 	done
 
 	for PARAM in "$@"; do
@@ -324,6 +342,11 @@ while true; do
 		-v | --var)
 			check_param "$@"
 			CULT_VARIABLES["$2"]="$3"
+			shift 2
+			;;
+		-j | --varjson)
+			check_param "$@"
+			CULT_VARIABLES_JSON["$2"]="$3"
 			shift 2
 			;;
 		-s | --step | --test-step)
