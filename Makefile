@@ -1,3 +1,4 @@
+SHELL=/usr/bin/bash
 
 ifeq (, $(shell command -v curl))
 $(error curl is a required dependency, more info at https://curl.se/)
