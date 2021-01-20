@@ -105,10 +105,21 @@ Once the variable is extracted, it can be used as parameters and at the request 
 variable name preceded by the dollar sign will be replaced by the variable value, ex:
 
 ```bash
-cult --print $my_ip
+cult --print \$my_ip
 ```
 
-### Random data
+#### JSON Variables
+It is also possible to capture JSON content as variables using the `--varjson` parameter instead of `--var`, ex:
+
+```bash
+cult --varjson my_ifconfig_response . http://ifconfig.me/all.json
+
+cult http://example.com << EOF
+    \$my_ifconfig_response
+EOF
+```
+
+### Random Data
 
 *Cult* makes use of [faker](https://faker.readthedocs.io/en/master/index.html) to put random data into the request body.
 The exclamation mark at the beginning of the value indicates a `faker` method as shown bellow. If required arguments can
