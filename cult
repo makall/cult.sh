@@ -83,6 +83,20 @@ STEP_ICONS=(
 	$'\e[33;1m\u25cc\e[m'
 )
 
+set_icon() {
+
+	local LOG_SIZE
+	local ICON="$2"
+	local CURRENT_ITEM="CURRENT_$1"
+	local CURRENT_LINE="CURRENT_$1_LINE"
+
+	[ -z "${!CURRENT_ITEM}" ] && return
+	LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+
+	local POS=$((1 + LOG_SIZE - ${!CURRENT_LINE}))
+	echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
+}
+
 logger() {
 
 	local LOG_SIZE
@@ -96,16 +110,25 @@ logger() {
 	[ 0 -ne "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && echo "[$1:FAILED] ${!CURRENT_ITEM}" >&"$TRACE"
 
 	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+
 		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
 		declare -g "$CURRENT_ICON=1"
-	fi
 
-	LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
+		local FOUND=''
+
+		for ITEM in SCENARIO CASE STEP; do
+			if [ -n "$FOUND" ]; then
+				set_icon "$ITEM" "$INFO_ICON"
+				declare -g "CURRENT_$ITEM="
+			elif [ "$ITEM" = "$1" ]; then
+				FOUND='1'
+			fi
+		done
+	fi
 
 	if [ -n "${!CURRENT_ITEM}" ]; then
 
 		local ICON="$INFO_ICON"
-		local POS=$((1 + LOG_SIZE - ${!CURRENT_LINE}))
 
 		if [ 0 -ne "$FAILED" ]; then
 			ICON="$FAIL_ICON"
@@ -116,10 +139,11 @@ logger() {
 			declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON}))"
 		fi
 
-		echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
+		set_icon "$1" "$ICON"
 	fi
 
 	if [ 0 -ne "$FAILED" ] || [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
+		LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
 		declare -g "$CURRENT_LINE=$LOG_SIZE"
 		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
 	fi
@@ -223,6 +247,13 @@ report() {
 	fi
 
 	return "$FAILS"
+}
+
+bye() {
+	if [ "$1" -ne "0" ]; then
+		echo -e " $WARN_ICON Script existed with an error\n"
+	fi
+	exit "$1"
 }
 
 prepare_query_params() {
@@ -400,10 +431,10 @@ done
 if [ -n "$CULT_REPORT" ]; then
 	cleanup
 	report
-	exit "$(($? + CULT_EXIT_STATUS))"
+	bye "$(($? + CULT_EXIT_STATUS))"
 elif [ -n "$CULT_CLEANUP" ]; then
 	cleanup
-	exit "$CULT_EXIT_STATUS"
+	bye "$CULT_EXIT_STATUS"
 fi
 
 exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")

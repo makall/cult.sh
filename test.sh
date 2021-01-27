@@ -2,6 +2,13 @@
 
 . ./cult
 
+./cult --step 'step'
+sleep 1
+./cult --case 'case'
+sleep 1
+./cult --scenario 'scenario'
+sleep 1
+
 ./cult --test '.ip != null' http://ip.jsontest.com/
 
 ./cult \
