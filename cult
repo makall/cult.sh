@@ -3,13 +3,55 @@
 #  CUrL Tester
 #  A simple REST test framework for shell script.
 #
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090,SC2064
 
 set -o errexit -o nounset -o pipefail
+
+CULT_TEMP_DIR="/tmp/cult"
+
+mkdir -p "$CULT_TEMP_DIR"
+
+CULT_LOG="$CULT_TEMP_DIR/log"
+CULT_CACHE="$CULT_TEMP_DIR/cache"
+CULT_TRACE="$CULT_TEMP_DIR/trace"
+
+# if it is sourced
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+
+	# if it is the root script
+	if [ 2 -eq "$SHLVL" ]; then
+
+		echo -n > "$CULT_CACHE"
+		echo -n > "$CULT_TRACE"
+		echo -n > "$CULT_LOG"
+
+		exec > >(tee --append "$CULT_LOG")
+		exec 2>&1
+
+		printf " \e[33;1m%s\e[m%s\e[33;1m%s\e[m%s\n" \
+			"   ___        " "    " " __   _____ " "         _            " \
+			"  / __\/\ /\\ " "_ __" " / /  /__   \\" "___  ___| |_ ___ _ __ " \
+			" / /  / / \ \\" " '__" "/ /     / /\\/" " _ \/ __| __/ _ \ '__|" \
+			"/ /___\ \_/ /" " |" " / /___  / /" " |  __/\__ \ ||  __/ |   " \
+			"\____/ \___/" "|_|" " \____/  \/ " $'  \___||___/\__\___|_| \n'
+
+		trap "${BASH_SOURCE[0]} --cleanup --report --exit-status \$?" EXIT
+
+	else
+
+		trap "${BASH_SOURCE[0]} --cleanup --exit-status \$?" EXIT
+	fi
+
+	return
+fi
 
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
+
+: "${CULT_CLEANUP:=}"
+: "${CULT_REPORT:=}"
+: "${CULT_EXIT_STATUS:=}"
 
 : "${CULT_WAIT:=}"
 : "${CULT_EXPECT:=2..}"
@@ -41,31 +83,10 @@ STEP_ICONS=(
 	$'\e[33;1m\u25cc\e[m'
 )
 
-logo() {
-	printf " \e[33;1m%s\e[m%s\e[33;1m%s\e[m%s\n" \
-		"   ___        " "    " " __   _____ " "         _            " \
-		"  / __\/\ /\\ " "_ __" " / /  /__   \\" "___  ___| |_ ___ _ __ " \
-		" / /  / / \ \\" " '__" "/ /     / /\\/" " _ \/ __| __/ _ \ '__|" \
-		"/ /___\ \_/ /" " |" " / /___  / /" " |  __/\__ \ ||  __/ |   " \
-		"\____/ \___/" "|_|" " \____/  \/ " $'  \___||___/\__\___|_| \n'
-}
-
-cleanup() {
-	echo "CURRENT_BEGIN=$(date +%s)" > "$CULT_CACHE"
-	echo -n > "$CULT_TRACE"
-	echo -n > "$CULT_LOG"
-}
-
-setup() {
-	exec > >(tee --append "$CULT_LOG")
-	exec 2>&1
-}
-
 logger() {
 
 	local LOG_SIZE
 	local FAILED="${2:-0}"
-	local REPORT="${3:-0}"
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
 	local CURRENT_ICON="CURRENT_$1_ICON"
@@ -88,7 +109,7 @@ logger() {
 
 		if [ 0 -ne "$FAILED" ]; then
 			ICON="$FAIL_ICON"
-		elif [ 0 -ne "$REPORT" ]; then
+		elif [ -n "$CULT_EXIT_STATUS" ]; then
 			ICON="$INFO_ICON"
 		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
 			ICON="${STEP_ICONS[$((${!CURRENT_ICON} % "${#STEP_ICONS[@]}"))]}"
@@ -145,9 +166,34 @@ title() {
 	echo -e "\n\e[37;1m${*}\e[m\n"
 }
 
-report() {
+persist() {
+	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+		declare -p "$CURRENT"
+	done > "$CULT_CACHE"
+}
 
-	local FAILED="$?"
+flush() {
+	local FAILED="${1:-$?}"
+	if [ 0 -ne "$FAILED" ]; then
+		CULT_SCENARIO='' logger "SCENARIO" "$FAILED"
+		CULT_CASE='' logger "CASE" "$FAILED"
+		CULT_STEP='' logger "STEP" "$FAILED"
+	fi
+	persist
+	return "$FAILED"
+}
+
+cleanup() {
+	CULT_SCENARIO='' logger 'SCENARIO'
+	CULT_CASE='' logger 'CASE'
+	CULT_STEP='' logger 'STEP'
+	CURRENT_SCENARIO=''
+	CURRENT_CASE=''
+	CURRENT_STEP=''
+	persist
+}
+
+report() {
 
 	REQUESTS=$(count 'REQUEST')
 	RESPONSES=$(count 'REQUEST')
@@ -157,39 +203,26 @@ report() {
 
 	FAILS=$((REQUESTS - RESPONSES + ASSERTIONS - SUCCESSES + $(count '[^:]+:FAILED')))
 
-	. "$CULT_CACHE"
+	title 'Report'
 
-	flush '0' '1' || true
+	column -ts: <<- EOF | sed 's/^/ /'
+		Items : Executed : Failed
+		$(entry "Scenarios" "SCENARIO")
+		$(entry "Cases" "CASE")
+		$(entry "Steps" "STEP")
+		Requests : $REQUESTS : $((REQUESTS - RESPONSES))
+		Assertions : $ASSERTIONS : $((ASSERTIONS - SUCCESSES))
+	EOF
 
-	# Show report only at the end of the root script
-	if [ "$(ps -o stat= -p $$)" != "$(ps -o stat= -p $PPID)" ]; then
+	title 'Result'
 
-		title 'Report'
-
-		column -ts: <<- EOF | sed 's/^/ /'
-			Items : Executed : Failed
-			$(entry "Scenarios" "SCENARIO")
-			$(entry "Cases" "CASE")
-			$(entry "Steps" "STEP")
-			Requests : $REQUESTS : $((REQUESTS - RESPONSES))
-			Assertions : $ASSERTIONS : $((ASSERTIONS - SUCCESSES))
-		EOF
-
-		[ -n "${CURRENT_BEGIN:-}" ] && echo -e "\n Total run duration: $(($(date '+%s') - CURRENT_BEGIN))s"
-
-		title 'Result'
-
-		if [ 0 -ne "$FAILS" ]; then
-			echo -e " $FAIL_ICON FAILED\n"
-		elif [ 0 -ne "$FAILED" ]; then
-			echo -e " $WARN_ICON Script existed with an error\n"
-		else
-			echo -e " $INFO_ICON SUCCEEDED\n"
-		fi
-
+	if [ 0 -ne "$FAILS" ]; then
+		echo -e " $FAIL_ICON FAILED\n"
+	else
+		echo -e " $INFO_ICON SUCCEEDED\n"
 	fi
 
-	return "$FAILED"
+	return "$FAILS"
 }
 
 prepare_query_params() {
@@ -285,24 +318,6 @@ print_all() {
 	done | sed 's/^/    /'
 }
 
-flush() {
-
-	local FAILED="${1:-$?}"
-	local REPORT="${2:-0}"
-
-	if [ 0 -ne "$FAILED" ] || [ 0 -ne "$REPORT" ]; then
-		CULT_SCENARIO='' logger "SCENARIO" "$FAILED" "$REPORT"
-		CULT_CASE='' logger "CASE" "$FAILED" "$REPORT"
-		CULT_STEP='' logger "STEP" "$FAILED" "$REPORT"
-	fi
-
-	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
-		declare -p "$CURRENT"
-	done > "$CULT_CACHE"
-
-	return "$FAILED"
-}
-
 check_param() {
 	[ 1 -lt "$#" ] && return
 	throw "'$1' parameter value is expected"
@@ -313,6 +328,14 @@ TRACE_ID="${OUTPUT#*.}"
 
 while true; do
 	case "${1:-}" in
+		--report) CULT_REPORT='1' ;;
+		--cleanup) CULT_CLEANUP='1' ;;
+		-w | --wait) CULT_WAIT='1' ;;
+		--exit-status)
+			check_param "$@"
+			CULT_EXIT_STATUS="$2"
+			shift
+			;;
 		-l | --lang)
 			check_param "$@"
 			CURRENT_LANG="$2"
@@ -323,7 +346,6 @@ while true; do
 			OUTPUT="$2"
 			shift
 			;;
-		-w | --wait) CULT_WAIT="1" ;;
 		-t | --test | -a | --assert)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
@@ -373,33 +395,22 @@ while true; do
 	shift
 done
 
-CULT_TEMP_DIR="/tmp/cult"
+[ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
 
-mkdir -p "$CULT_TEMP_DIR"
-
-CULT_LOG="$CULT_TEMP_DIR/log"
-CULT_CACHE="$CULT_TEMP_DIR/cache"
-CULT_TRACE="$CULT_TEMP_DIR/trace"
+if [ -n "$CULT_REPORT" ]; then
+	cleanup
+	report
+	exit "$(($? + CULT_EXIT_STATUS))"
+elif [ -n "$CULT_CLEANUP" ]; then
+	cleanup
+	exit "$CULT_EXIT_STATUS"
+fi
 
 exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
 
 touch "$CULT_LOG"
 
-if [ "${BASH_SOURCE[0]}" != "$0" ]; then
-
-	if [ 2 -eq "$SHLVL" ]; then
-		cleanup
-		setup
-		logo
-	fi
-
-	trap 'report' EXIT
-	return
-fi
-
 trap 'flush' EXIT
-
-[ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
 
 logger "SCENARIO"
 logger "CASE"
