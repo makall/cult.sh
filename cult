@@ -3,7 +3,7 @@
 #  CUrL Tester
 #  A simple REST test framework for shell script.
 #
-# shellcheck disable=SC1090,SC2064
+# shellcheck disable=SC1090,SC2064,SC2120
 
 set -o errexit -o nounset -o pipefail
 
@@ -35,11 +35,11 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 			"/ /___\ \_/ /" " |" " / /___  / /" " |  __/\__ \ ||  __/ |   " \
 			"\____/ \___/" "|_|" " \____/  \/ " $'  \___||___/\__\___|_| \n'
 
-		trap "${BASH_SOURCE[0]} --cleanup --report --exit-status \$?" EXIT
+		trap "${BASH_SOURCE[0]} --report \$? $0" EXIT
 
 	else
 
-		trap "${BASH_SOURCE[0]} --cleanup --exit-status \$?" EXIT
+		trap "${BASH_SOURCE[0]} --cleanup \$? $0" EXIT
 	fi
 
 	return
@@ -48,10 +48,6 @@ fi
 : "${CULT_STEP:=}"
 : "${CULT_CASE:=}"
 : "${CULT_SCENARIO:=}"
-
-: "${CULT_CLEANUP:=}"
-: "${CULT_REPORT:=}"
-: "${CULT_EXIT_STATUS:=}"
 
 : "${CULT_WAIT:=}"
 : "${CULT_EXPECT:=2..}"
@@ -83,69 +79,56 @@ STEP_ICONS=(
 	$'\e[33;1m\u25cc\e[m'
 )
 
-set_icon() {
+log_size() {
+	sed -E 's/(\x1b\[s\x1b\[[0-9]+A.*\x1b\[u|\x0d$)//g;s/\x1b\[[0-9]+;[0-9]+[mGK]([^\x1b]+)\x1b\[m/\1/g' \
+		"$CULT_LOG" | fold -w "$(tput cols)" | wc -l | cut -d ' ' -f1
+}
 
-	local LOG_SIZE
-	local ICON="$2"
-	local CURRENT_ITEM="CURRENT_$1"
+update_label() {
 	local CURRENT_LINE="CURRENT_$1_LINE"
-
-	[ -z "${!CURRENT_ITEM}" ] && return
-	LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
-
-	local POS=$((1 + LOG_SIZE - ${!CURRENT_LINE}))
-	echo -ne "\e[s\e[${POS}A\r $ICON\e[u"
+	local POS=$((1 + "$(log_size)" - ${!CURRENT_LINE}))
+	echo -ne "\e[s\e[${POS}A\r $2\e[u"
 }
 
 logger() {
 
-	local LOG_SIZE
-	local FAILED="${2:-0}"
 	local CULT_ITEM="CULT_$1"
 	local CURRENT_ITEM="CURRENT_$1"
-	local CURRENT_ICON="CURRENT_$1_ICON"
-	local CURRENT_LINE="CURRENT_$1_LINE"
 
-	[ -n "${!CULT_ITEM}" ] && echo "[$1] ${!CULT_ITEM}" >&"$TRACE"
-	[ 0 -ne "$FAILED" ] && [ -n "${!CURRENT_ITEM}" ] && echo "[$1:FAILED] ${!CURRENT_ITEM}" >&"$TRACE"
-
-	if [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-
-		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
-		declare -g "$CURRENT_ICON=1"
+	if [ -n "${!CULT_ITEM}" ]; then
 
 		local FOUND=''
+		local TEMP_ITEM
+		local CURRENT_LINE="CURRENT_$1_LINE"
 
 		for ITEM in SCENARIO CASE STEP; do
-			if [ -n "$FOUND" ]; then
-				set_icon "$ITEM" "$INFO_ICON"
-				declare -g "CURRENT_$ITEM="
-			elif [ "$ITEM" = "$1" ]; then
+
+			if [ "$ITEM" = "$1" ]; then
 				FOUND='1'
+			elif [ -z "$FOUND" ]; then
+				continue
+			fi
+
+			TEMP_ITEM="CURRENT_$ITEM"
+
+			if [ -n "${!TEMP_ITEM}" ]; then
+				update_label "$ITEM" "$INFO_ICON"
+				declare -g "$TEMP_ITEM="
 			fi
 		done
-	fi
 
-	if [ -n "${!CURRENT_ITEM}" ]; then
+		echo "[$1] ${!CULT_ITEM}" >&"$TRACE"
+		echo -e " ${STEP_ICONS[0]} ${!CULT_ITEM}"
 
-		local ICON="$INFO_ICON"
-
-		if [ 0 -ne "$FAILED" ]; then
-			ICON="$FAIL_ICON"
-		elif [ -n "$CULT_EXIT_STATUS" ]; then
-			ICON="$INFO_ICON"
-		elif [ -z "${!CULT_ITEM}" ] || [ "${!CULT_ITEM}" = "${!CURRENT_ITEM}" ]; then
-			ICON="${STEP_ICONS[$((${!CURRENT_ICON} % "${#STEP_ICONS[@]}"))]}"
-			declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON}))"
-		fi
-
-		set_icon "$1" "$ICON"
-	fi
-
-	if [ 0 -ne "$FAILED" ] || [ -n "${!CULT_ITEM}" ] && [ "${!CULT_ITEM}" != "${!CURRENT_ITEM}" ]; then
-		LOG_SIZE=$(wc -l "$CULT_LOG" | cut -d ' ' -f1)
-		declare -g "$CURRENT_LINE=$LOG_SIZE"
 		declare -g "$CURRENT_ITEM=${!CULT_ITEM}"
+		declare -g "$CURRENT_LINE=$(log_size)"
+		declare -g "$CULT_ITEM="
+
+	elif [ -n "${!CURRENT_ITEM}" ]; then
+
+		local CURRENT_ICON="CURRENT_$1_ICON"
+		declare -g "$CURRENT_ICON=$((1 + ${!CURRENT_ICON:-0}))"
+		update_label "$1" "${STEP_ICONS[$((${!CURRENT_ICON} % "${#STEP_ICONS[@]}"))]}"
 	fi
 }
 
@@ -173,9 +156,38 @@ request() {
 	echo "[RESPONSE] $CURRENT_RESPONSE" >&"$TRACE"
 }
 
-throw() {
-	echo -e " $FAIL_ICON $*" >&2
-	return 1
+cleanup() {
+
+	local FAILED="${1:-$?}"
+	local SCRIPT="${2:-}"
+
+	if [ 0 -ne "$FAILED" ] || [ -n "$SCRIPT" ]; then
+		local ITEM
+		local ICON="$INFO_ICON"
+		for ITEM in SCENARIO CASE STEP; do
+			local CURRENT_ITEM="CURRENT_$ITEM"
+			if [ -n "${!CURRENT_ITEM}" ]; then
+				if [ 0 -ne "$FAILED" ]; then
+					echo "[$ITEM:FAILED] ${!CURRENT_ITEM}" >&"$TRACE"
+					ICON="$FAIL_ICON"
+				fi
+				update_label "$ITEM" "$ICON"
+				declare -g "$CURRENT_ITEM="
+			fi
+		done
+	fi
+
+	if [ -n "$SCRIPT" ]; then
+		echo "[SCRIPT] $SCRIPT" >&"$TRACE"
+		if [ 0 -ne "$FAILED" ]; then
+			echo "[SCRIPT:FAILED] $SCRIPT" >&"$TRACE"
+			echo -e " $WARN_ICON $SCRIPT exited with error $FAILED." >&2
+		fi
+	fi
+
+	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
+		declare -p "$CURRENT"
+	done > "$CULT_CACHE"
 }
 
 count() {
@@ -188,33 +200,6 @@ entry() {
 
 title() {
 	echo -e "\n\e[37;1m${*}\e[m\n"
-}
-
-persist() {
-	for CURRENT in $(set | sed -nE 's/^(CURRENT_[^=]*)=.*/\1/p'); do
-		declare -p "$CURRENT"
-	done > "$CULT_CACHE"
-}
-
-flush() {
-	local FAILED="${1:-$?}"
-	if [ 0 -ne "$FAILED" ]; then
-		CULT_SCENARIO='' logger "SCENARIO" "$FAILED"
-		CULT_CASE='' logger "CASE" "$FAILED"
-		CULT_STEP='' logger "STEP" "$FAILED"
-	fi
-	persist
-	return "$FAILED"
-}
-
-cleanup() {
-	CULT_SCENARIO='' logger 'SCENARIO'
-	CULT_CASE='' logger 'CASE'
-	CULT_STEP='' logger 'STEP'
-	CURRENT_SCENARIO=''
-	CURRENT_CASE=''
-	CURRENT_STEP=''
-	persist
 }
 
 report() {
@@ -231,6 +216,7 @@ report() {
 
 	column -ts: <<- EOF | sed 's/^/ /'
 		Items : Executed : Failed
+		$(entry "Scripts" "SCRIPT")
 		$(entry "Scenarios" "SCENARIO")
 		$(entry "Cases" "CASE")
 		$(entry "Steps" "STEP")
@@ -247,13 +233,6 @@ report() {
 	fi
 
 	return "$FAILS"
-}
-
-bye() {
-	if [ "$1" -ne "0" ]; then
-		echo -e " $WARN_ICON Script existed with an error\n"
-	fi
-	exit "$1"
 }
 
 prepare_query_params() {
@@ -284,6 +263,11 @@ parse_data() {
 	else
 		echo "$DATA"
 	fi
+}
+
+throw() {
+	echo -e " $FAIL_ICON $*" >&2
+	return 1
 }
 
 fail() {
@@ -354,19 +338,31 @@ check_param() {
 	throw "'$1' parameter value is expected"
 }
 
+assign_label() {
+	local CULT_ITEM="CULT_$1"
+	local CURRENT_ITEM="CURRENT_$1"
+	[ "${!CURRENT_ITEM}" = "$2" ] || declare -g "$CULT_ITEM=$2"
+}
+
 OUTPUT=$(mktemp)
 TRACE_ID="${OUTPUT#*.}"
 
+exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
+
+[ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
+
 while true; do
 	case "${1:-}" in
-		--report) CULT_REPORT='1' ;;
-		--cleanup) CULT_CLEANUP='1' ;;
-		-w | --wait) CULT_WAIT='1' ;;
-		--exit-status)
-			check_param "$@"
-			CULT_EXIT_STATUS="$2"
-			shift
+		--report)
+			cleanup "$2" "$3"
+			report
+			exit "$(($? + $2))"
 			;;
+		--cleanup)
+			cleanup "$2" "$3"
+			exit "$2"
+			;;
+		-w | --wait) CULT_WAIT='1' ;;
 		-l | --lang)
 			check_param "$@"
 			CURRENT_LANG="$2"
@@ -377,7 +373,7 @@ while true; do
 			OUTPUT="$2"
 			shift
 			;;
-		-t | --test | -a | --assert)
+		-t | --test)
 			check_param "$@"
 			CULT_ASSERT+=("$2")
 			shift
@@ -402,19 +398,19 @@ while true; do
 			CULT_VARIABLES_JSON["$2"]="$3"
 			shift 2
 			;;
-		-s | --step | --test-step)
+		-s | --step)
 			check_param "$@"
-			CULT_STEP="           $2"
+			assign_label 'STEP' "           $2"
 			shift
 			;;
-		-c | --case | --test-case)
+		-c | --case)
 			check_param "$@"
-			CULT_CASE="     Case: $2"
+			assign_label 'CASE' "     Case: $2"
 			shift
 			;;
-		-S | --scenario | --test-scenario)
+		-S | --scenario)
 			check_param "$@"
-			CULT_SCENARIO=" Scenario: $2"
+			assign_label 'SCENARIO' " Scenario: $2"
 			shift
 			;;
 		--)
@@ -426,22 +422,7 @@ while true; do
 	shift
 done
 
-[ -f "$CULT_CACHE" ] && . "$CULT_CACHE"
-
-if [ -n "$CULT_REPORT" ]; then
-	cleanup
-	report
-	bye "$(($? + CULT_EXIT_STATUS))"
-elif [ -n "$CULT_CLEANUP" ]; then
-	cleanup
-	bye "$CULT_EXIT_STATUS"
-fi
-
-exec {TRACE}> >(sed "s/^/${TRACE_ID}: /" >> "$CULT_TRACE")
-
-touch "$CULT_LOG"
-
-trap 'flush' EXIT
+trap 'cleanup' EXIT
 
 logger "SCENARIO"
 logger "CASE"

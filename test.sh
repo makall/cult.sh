@@ -2,12 +2,18 @@
 
 . ./cult
 
-./cult --step 'step'
-sleep 1
-./cult --case 'case'
-sleep 1
-./cult --scenario 'scenario'
-sleep 1
+
+./cult --scenario "Labeling"
+./cult --case "Should print the current scenario, case and step properly"
+
+./cult --step "Check scenario labeling"
+grep --silent --regexp='Scenario: Labeling$' "$CULT_LOG"
+
+./cult --step "Check case labeling"
+grep --silent --regexp="Case: Should print the current scenario, case and step properly$" "$CULT_LOG"
+
+./cult --step "Check step labeling"
+grep --silent --regexp="Check step labeling$" "$CULT_LOG"
 
 ./cult --test '.ip != null' http://ip.jsontest.com/
 
