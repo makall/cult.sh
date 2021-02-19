@@ -1,15 +1,15 @@
-SHELL=/usr/bin/bash
+SHELL=/bin/bash
 
-ifeq (, $(shell command -v curl))
+ifeq (, $(shell curl --version))
 $(error curl is a required dependency, more info at https://curl.se/)
 endif
 
-ifeq (, $(shell command -v jq))
+ifeq (, $(shell jq --version))
 $(error jq is a required dependency, more info at https://stedolan.github.io/jq)
 endif
 
-ifeq (, $(shell command -v faker))
-$(error faker is a required dependency, more info at https://faker.readthedocs.io/)
+ifeq (, $(shell faker --version))
+$(warning faker is an optional dependency, more info at https://faker.readthedocs.io/)
 endif
 
 all: test
