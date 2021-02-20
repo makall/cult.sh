@@ -27,7 +27,7 @@ grep --silent --regexp="Check step labeling$" "$CULT_LOG"
 	EOF
 
 ./cult \
-	--case "Should support comments in the body" \
+	--case "Should populate faker placeholders" \
 	'http://echo.jsontest.com/hello/world' <<- EOF
 		{
 			"fixed": "fixedValue",

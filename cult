@@ -25,7 +25,7 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
 		echo -n > "$CULT_TRACE"
 		echo -n > "$CULT_LOG"
 
-		exec > >(tee --append "$CULT_LOG")
+		exec > >(tee -a "$CULT_LOG")
 		exec 2>&1
 
 		printf " \e[33;1m%s\e[m%s\e[33;1m%s\e[m%s\n" \
@@ -80,8 +80,12 @@ STEP_ICONS=(
 )
 
 log_size() {
-	sed -E 's/(\x1b\[s\x1b\[[0-9]+A.*\x1b\[u|\x0d$)//g;s/\x1b\[[0-9]+;[0-9]+[mGK]([^\x1b]+)\x1b\[m/\1/g' \
-		"$CULT_LOG" | fold -w "$(tput cols)" | wc -l | cut -d ' ' -f1
+	if uname | grep -qx 'Linux'; then
+		sed -E $'s/(\x1b\\[s\x1b\\[[0-9]+A.*\x1b\\[u|\x0d$)//g;s/\x1b\\[[0-9]+;[0-9]+[mGK]([^\x1b]+)\x1b\[m/\\1/g' \
+			"$CULT_LOG" | fold -w "$(tput cols)" | wc -l
+	else
+		wc -l < "$CULT_LOG"
+	fi
 }
 
 update_label() {
@@ -253,7 +257,7 @@ parse_data() {
 
 	DATA=$(jq "${QUERY_PARAMS[@]}" --from-file "$1" <(echo '{}'))
 	FAKES=$(jq 'paths as $p | getpath($p) as $v | select($v | type == "string" and match("^!")) | [ $p | "." + join("."), $v | split("{") ] | flatten' <<< "$DATA" |
-		sed -E 's/^(\s+"\.[^,]+)\.([0-9]+)\./\1[\2]./; s/^(\s+")!/\1/; s/^(\s+)"(.+)}"$/\1{\2}/; s/^\[/(/; s/]$/),/')
+		sed -E 's/^]$/),/;s/^\[$/(/;s/^ *"!/"/;s/^ *"(.*})"$/{\1/')
 
 	if [ -n "$FAKES" ]; then
 		python3 -c "import faker; print(faker.Faker(['$CURRENT_LANG']).json(data_columns=[$FAKES], num_rows=1))" |

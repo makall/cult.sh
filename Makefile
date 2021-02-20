@@ -8,6 +8,10 @@ ifeq (, $(shell jq --version))
 $(error jq is a required dependency, more info at https://stedolan.github.io/jq)
 endif
 
+ifeq (, $(shell envsubst --version))
+$(error envsubst is a required dependency, more info at https://linux.die.net/man/1/envsubst)
+endif
+
 ifeq (, $(shell faker --version))
 $(warning faker is an optional dependency, more info at https://faker.readthedocs.io/)
 endif
