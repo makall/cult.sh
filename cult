@@ -256,7 +256,7 @@ parse_data() {
 		sed -E 's/^(\s+"\.[^,]+)\.([0-9]+)\./\1[\2]./; s/^(\s+")!/\1/; s/^(\s+)"(.+)}"$/\1{\2}/; s/^\[/(/; s/]$/),/')
 
 	if [ -n "$FAKES" ]; then
-		python -c "import faker; print(faker.Faker(['$CURRENT_LANG']).json(data_columns=[$FAKES], num_rows=1))" |
+		python3 -c "import faker; print(faker.Faker(['$CURRENT_LANG']).json(data_columns=[$FAKES], num_rows=1))" |
 			jq --compact-output 'paths as $p | getpath($p) as $v | [ $p | join("."), $v ]' |
 			sed -E 's/^\[//; s/\]$//; s/^"([^"]+)",/\1=/; $!s/$/|/' |
 			jq --compact-output --from-file /dev/stdin <(echo "$DATA")
