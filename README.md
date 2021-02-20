@@ -144,3 +144,4 @@ While distro packages aren't available, the simplest way to install it is using 
 sudo make install
 ```
 
+**Note**: it was tested on Linux without restriction and on macOS it was tested using iTerm2 and Bash 5.

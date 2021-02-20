@@ -257,7 +257,7 @@ parse_data() {
 
 	DATA=$(jq "${QUERY_PARAMS[@]}" --from-file "$1" <(echo '{}'))
 	FAKES=$(jq 'paths as $p | getpath($p) as $v | select($v | type == "string" and match("^!")) | [ $p | "." + join("."), $v | split("{") ] | flatten' <<< "$DATA" |
-		sed -E 's/^]$/),/;s/^\[$/(/;s/^ *"!/"/;s/^ *"(.*})"$/{\1/')
+		sed -E 's/(.*)\.([0-9]+)\./\1[\2]./;s/^]$/),/;s/^\[$/(/;s/^ *"!/"/;s/^ *"(.*})"$/{\1/')
 
 	if [ -n "$FAKES" ]; then
 		python3 -c "import faker; print(faker.Faker(['$CURRENT_LANG']).json(data_columns=[$FAKES], num_rows=1))" |
