@@ -18,4 +18,4 @@ test:
 	@./test.sh
 
 install: cult
-	install cult /usr/bin
+	install cult /usr/local/bin
