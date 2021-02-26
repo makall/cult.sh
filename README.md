@@ -108,6 +108,14 @@ variable name preceded by the dollar sign will be replaced by the variable value
 cult --print \$my_ip
 ```
 
+The variables are replaced by their respective value using `jq`, so their use follows the same syntax, ex:
+
+```bash
+cult http://example.com << EOF
+    { "MyIp": \$my_ip }
+EOF
+```
+
 #### JSON Variables
 It is also possible to capture JSON content as variables using the `--varjson` parameter instead of `--var`, ex:
 

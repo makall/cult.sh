@@ -15,14 +15,14 @@ grep --silent --regexp="Case: Should print the current scenario, case and step p
 ./cult --step "Check step labeling"
 grep --silent --regexp="Check step labeling$" "$CULT_LOG"
 
-./cult --test '.ip != null' http://ip.jsontest.com/
+./cult --var ip .ip --test '.ip != null' http://ip.jsontest.com/
 
 ./cult \
 	--case "Should support comments in the body" \
 	'http://echo.jsontest.com/hello/world' <<- EOF
 		{
 			# ignoring comment
-			"hello": "world"
+			"MyIp": \$ip
 		}
 	EOF
 
